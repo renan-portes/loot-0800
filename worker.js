@@ -1,5 +1,11 @@
 const axios = require('axios');
-const { getAllUsers, isGameNotified, markGameNotified, DEFAULT_PREFERENCES } = require('./database');
+const {
+  getAllUsers,
+  getUser,
+  isGameNotified,
+  markGameNotified,
+  DEFAULT_PREFERENCES
+} = require('./database');
 
 const GAMERPOWER_API_URL = 'https://www.gamerpower.com/api/giveaways?type=game';
 const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 jogos por execução
@@ -87,7 +93,7 @@ function isGameMatchingPreferences(game, userPreferences) {
 }
 
 /**
- * Busca jogos gratuitos na GamerPower API e notifica os usuários cadastrados com base em suas preferências.
+ * Busca jogos gratuitos na GamerPower API e notifica os usuários cadastrados com base em suas preferências (Ciclo Automático).
  * @param {object} bot - Instância do bot do Telegram
  */
 async function checkAndNotifyGames(bot) {
@@ -188,8 +194,81 @@ async function checkAndNotifyGames(bot) {
   }
 }
 
+/**
+ * Busca os jogos ativos mais recentes na GamerPower API e envia diretamente para um usuário específico (on-demand).
+ * @param {object} bot - Instância do bot do Telegram
+ * @param {string|number} chatId - ID do chat do Telegram
+ */
+async function sendRecentGamesToUser(bot, chatId) {
+  if (!bot || !chatId) return;
+
+  try {
+    const response = await axios.get(GAMERPOWER_API_URL, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Loot0800-Bot/2.0' }
+    });
+
+    const games = response.data;
+    if (!Array.isArray(games) || games.length === 0) {
+      await bot.sendMessage(
+        chatId,
+        '🎮 Não encontramos nenhum drop ativo no momento. Fique de olho, avisaremos assim que surgir novidade!'
+      );
+      return;
+    }
+
+    // Busca preferências do usuário
+    const user = await getUser(chatId);
+    let userPreferences = DEFAULT_PREFERENCES;
+    if (user && user.preferences) {
+      userPreferences = typeof user.preferences === 'string'
+        ? JSON.parse(user.preferences)
+        : user.preferences;
+    }
+
+    // Filtra jogos pelas preferências do usuário
+    const matchingGames = games.filter((game) => isGameMatchingPreferences(game, userPreferences));
+
+    if (matchingGames.length === 0) {
+      await bot.sendMessage(
+        chatId,
+        '🎮 Não encontramos jogos ativos para as suas plataformas selecionadas no momento.\n\n💡 Use /config para adicionar mais plataformas ao seu radar!'
+      );
+      return;
+    }
+
+    // Seleciona os 3 primeiros jogos ativos
+    const gamesToSend = matchingGames.slice(0, 3);
+
+    for (const game of gamesToSend) {
+      const caption = formatGameCaption(game);
+      try {
+        if (game.thumbnail) {
+          await bot.sendPhoto(chatId, game.thumbnail, {
+            caption,
+            parse_mode: 'HTML'
+          });
+        } else {
+          await bot.sendMessage(chatId, caption, {
+            parse_mode: 'HTML'
+          });
+        }
+      } catch (err) {
+        console.error(`[Worker] Erro ao enviar jogo recente para ${chatId}:`, err.message);
+      }
+    }
+  } catch (error) {
+    console.error(`[Worker] Erro ao buscar jogos recentes para ${chatId}:`, error.message);
+    await bot.sendMessage(
+      chatId,
+      '❌ Ocorreu uma instabilidade momentânea ao consultar os drops. Tente novamente em alguns instantes!'
+    );
+  }
+}
+
 module.exports = {
   checkAndNotifyGames,
+  sendRecentGamesToUser,
   formatGameCaption,
   isGameMatchingPreferences
 };

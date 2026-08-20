@@ -9,7 +9,7 @@ const {
   updateUserPreferences,
   DEFAULT_PREFERENCES
 } = require('./database');
-const { checkAndNotifyGames } = require('./worker');
+const { checkAndNotifyGames, sendRecentGamesToUser } = require('./worker');
 
 // Configurações de ambiente
 const PORT = process.env.PORT || 3000;
@@ -30,7 +30,7 @@ const STORE_OPTIONS = [
 ];
 
 /**
- * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja.
+ * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja e atalho de recentes.
  * @param {Array<string>} userPreferences - Lista de preferências do usuário
  * @returns {Array<Array<object>>} - Matriz de botões para o Telegram
  */
@@ -58,9 +58,13 @@ function buildPreferencesKeyboard(userPreferences) {
     rows.push(row);
   }
 
-  // Ação rápida para selecionar/desmarcar todas
+  // Botões de ação rápida
   rows.push([
     { text: '✨ Marcar / Desmarcar Todas', callback_data: 'toggle:all' }
+  ]);
+
+  rows.push([
+    { text: '🎁 Ver Jogos Recentes agora', callback_data: 'get_recent_games' }
   ]);
 
   return rows;
@@ -80,7 +84,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     console.log(`[Telegram Bot] Polling error: ${err.message}`);
   });
 
-  // Comando /start
+  // Comando /start com botão interativo de onboarding para ver jogos recentes
   bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
 
@@ -93,8 +97,15 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
     bot.sendMessage(
       chatId,
-      `Bem-vindo ao Loot 0800! 🎮 O seu radar está online. Seu ID foi registrado com sucesso para receber os próximos drops!\n\n` +
-      `⚙️ Digite /config para personalizar quais lojas e plataformas você quer monitorar.`
+      `Bem-vindo ao Loot 0800! 🎮 O seu radar de jogos grátis está online. Seu ID foi registrado com sucesso!\n\n` +
+      `⚡ Clique no botão abaixo para conferir os melhores drops ativos agora ou digite /config para personalizar suas plataformas.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🎁 Ver Jogos Recentes agora', callback_data: 'get_recent_games' }]
+          ]
+        }
+      }
     );
   });
 
@@ -139,57 +150,77 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     const messageId = query.message.message_id;
     const data = query.data;
 
-    if (!data || !data.startsWith('toggle:')) {
+    if (!data) return;
+
+    // Ação: Buscar jogos recentes instantaneamente
+    if (data === 'get_recent_games') {
+      try {
+        await bot.answerCallbackQuery(query.id, {
+          text: 'Buscando os melhores drops para você...'
+        });
+
+        await bot.sendMessage(
+          chatId,
+          '🔍 Buscando os melhores drops ativos para você no momento...'
+        );
+
+        await sendRecentGamesToUser(bot, chatId);
+      } catch (err) {
+        console.error('[Telegram Bot] Erro ao buscar jogos recentes:', err.message);
+      }
       return;
     }
 
-    const storeKey = data.replace('toggle:', '');
+    // Ação: Alternar preferências de plataformas
+    if (data.startsWith('toggle:')) {
+      const storeKey = data.replace('toggle:', '');
 
-    try {
-      await addUser(chatId);
-      const user = await getUser(chatId);
-      let userPreferences = DEFAULT_PREFERENCES;
+      try {
+        await addUser(chatId);
+        const user = await getUser(chatId);
+        let userPreferences = DEFAULT_PREFERENCES;
 
-      if (user && user.preferences) {
-        userPreferences = typeof user.preferences === 'string'
-          ? JSON.parse(user.preferences)
-          : user.preferences;
-      }
-
-      // Lógica de alternância (Toggle)
-      if (storeKey === 'all') {
-        if (userPreferences.length === DEFAULT_PREFERENCES.length) {
-          userPreferences = [];
-        } else {
-          userPreferences = [...DEFAULT_PREFERENCES];
+        if (user && user.preferences) {
+          userPreferences = typeof user.preferences === 'string'
+            ? JSON.parse(user.preferences)
+            : user.preferences;
         }
-      } else {
-        if (userPreferences.includes(storeKey)) {
-          userPreferences = userPreferences.filter((k) => k !== storeKey);
+
+        // Lógica de alternância (Toggle)
+        if (storeKey === 'all') {
+          if (userPreferences.length === DEFAULT_PREFERENCES.length) {
+            userPreferences = [];
+          } else {
+            userPreferences = [...DEFAULT_PREFERENCES];
+          }
         } else {
-          userPreferences.push(storeKey);
+          if (userPreferences.includes(storeKey)) {
+            userPreferences = userPreferences.filter((k) => k !== storeKey);
+          } else {
+            userPreferences.push(storeKey);
+          }
         }
+
+        // Salva no banco de dados SQLite
+        await updateUserPreferences(chatId, userPreferences);
+
+        // Atualiza o teclado inline com os novos ícones (✅ / ❌)
+        const newKeyboard = buildPreferencesKeyboard(userPreferences);
+
+        await bot.answerCallbackQuery(query.id, {
+          text: storeKey === 'all'
+            ? 'Todas as plataformas foram alternadas!'
+            : `Plataforma atualizada!`
+        });
+
+        await bot.editMessageReplyMarkup(
+          { inline_keyboard: newKeyboard },
+          { chat_id: chatId, message_id: messageId }
+        );
+      } catch (err) {
+        console.error('[Telegram Bot] Erro ao processar callback_query:', err.message);
+        bot.answerCallbackQuery(query.id, { text: 'Erro ao atualizar preferência.' });
       }
-
-      // Salva no banco de dados SQLite
-      await updateUserPreferences(chatId, userPreferences);
-
-      // Atualiza o teclado inline com os novos ícones (✅ / ❌)
-      const newKeyboard = buildPreferencesKeyboard(userPreferences);
-
-      await bot.answerCallbackQuery(query.id, {
-        text: storeKey === 'all'
-          ? 'Todas as plataformas foram alternadas!'
-          : `Plataforma atualizada!`
-      });
-
-      await bot.editMessageReplyMarkup(
-        { inline_keyboard: newKeyboard },
-        { chat_id: chatId, message_id: messageId }
-      );
-    } catch (err) {
-      console.error('[Telegram Bot] Erro ao processar callback_query:', err.message);
-      bot.answerCallbackQuery(query.id, { text: 'Erro ao atualizar preferência.' });
     }
   });
 
