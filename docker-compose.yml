@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  loot-bot:
+    build: .
+    container_name: loot0800_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - ./database.sqlite:/app/database.sqlite
+    environment:
+      - NODE_ENV=production
