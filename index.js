@@ -3,12 +3,68 @@ const path = require('path');
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
-const { addUser, getUser, updateUserPreferences } = require('./database');
+const {
+  addUser,
+  getUser,
+  updateUserPreferences,
+  DEFAULT_PREFERENCES
+} = require('./database');
 const { checkAndNotifyGames } = require('./worker');
 
 // Configurações de ambiente
 const PORT = process.env.PORT || 3000;
 const token = process.env.TELEGRAM_BOT_TOKEN;
+
+// Lista de lojas e plataformas para os botões do Telegram
+const STORE_OPTIONS = [
+  { id: 'epic', name: 'Epic Games' },
+  { id: 'steam', name: 'Steam' },
+  { id: 'gog', name: 'GOG' },
+  { id: 'amazon', name: 'Prime Gaming' },
+  { id: 'playstation', name: 'PlayStation' },
+  { id: 'xbox', name: 'Xbox' },
+  { id: 'switch', name: 'Switch' },
+  { id: 'itch', name: 'Itch.io' },
+  { id: 'android', name: 'Android' },
+  { id: 'ios', name: 'iOS' }
+];
+
+/**
+ * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja.
+ * @param {Array<string>} userPreferences - Lista de preferências do usuário
+ * @returns {Array<Array<object>>} - Matriz de botões para o Telegram
+ */
+function buildPreferencesKeyboard(userPreferences) {
+  const prefs = Array.isArray(userPreferences) ? userPreferences : DEFAULT_PREFERENCES;
+  const rows = [];
+
+  for (let i = 0; i < STORE_OPTIONS.length; i += 2) {
+    const row = [];
+    const s1 = STORE_OPTIONS[i];
+    const isChecked1 = prefs.includes(s1.id);
+    row.push({
+      text: `${isChecked1 ? '✅' : '❌'} ${s1.name}`,
+      callback_data: `toggle:${s1.id}`
+    });
+
+    if (i + 1 < STORE_OPTIONS.length) {
+      const s2 = STORE_OPTIONS[i + 1];
+      const isChecked2 = prefs.includes(s2.id);
+      row.push({
+        text: `${isChecked2 ? '✅' : '❌'} ${s2.name}`,
+        callback_data: `toggle:${s2.id}`
+      });
+    }
+    rows.push(row);
+  }
+
+  // Ação rápida para selecionar/desmarcar todas
+  rows.push([
+    { text: '✨ Marcar / Desmarcar Todas', callback_data: 'toggle:all' }
+  ]);
+
+  return rows;
+}
 
 // 1. Inicialização do Bot do Telegram (modo Polling)
 let bot = null;
@@ -38,23 +94,106 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     bot.sendMessage(
       chatId,
       `Bem-vindo ao Loot 0800! 🎮 O seu radar está online. Seu ID foi registrado com sucesso para receber os próximos drops!\n\n` +
-      `⚙️ Digite /config para personalizar quais lojas você quer monitorar.`
+      `⚙️ Digite /config para personalizar quais lojas e plataformas você quer monitorar.`
     );
   });
 
-  // Comando /config (Gera link do portal de preferências com o chatId)
-  bot.onText(/\/config/, (msg) => {
+  // Comando /config (Envia link do portal Web E botões Inline Keyboard)
+  bot.onText(/\/config/, async (msg) => {
     const chatId = msg.chat.id;
     const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
     const configUrl = `${baseUrl}/?chatId=${chatId}`;
 
+    let userPreferences = DEFAULT_PREFERENCES;
+    try {
+      await addUser(chatId);
+      const user = await getUser(chatId);
+      if (user && user.preferences) {
+        userPreferences = typeof user.preferences === 'string'
+          ? JSON.parse(user.preferences)
+          : user.preferences;
+      }
+    } catch (err) {
+      console.error('[Telegram Bot] Erro ao buscar preferências do usuário para /config:', err.message);
+    }
+
+    const keyboard = buildPreferencesKeyboard(userPreferences);
+
     bot.sendMessage(
       chatId,
-      `⚙️ Acesse seu portal para configurar seus alertas:\n${configUrl}`
+      `⚙️ <b>Painel de Preferências - Loot 0800</b>\n\n` +
+      `Toque nos botões abaixo para ativar ou desativar plataformas diretamente no Telegram, ou acesse o portal Web:\n` +
+      `🌐 <a href="${configUrl}">Abrir Portal Web</a>`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: keyboard
+        }
+      }
     );
   });
 
-  console.log('[Telegram Bot] Bot conectado e escutando comandos (/start, /config) em modo Polling...');
+  // Interceptador de cliques nos botões Inline Keyboard
+  bot.on('callback_query', async (query) => {
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const data = query.data;
+
+    if (!data || !data.startsWith('toggle:')) {
+      return;
+    }
+
+    const storeKey = data.replace('toggle:', '');
+
+    try {
+      await addUser(chatId);
+      const user = await getUser(chatId);
+      let userPreferences = DEFAULT_PREFERENCES;
+
+      if (user && user.preferences) {
+        userPreferences = typeof user.preferences === 'string'
+          ? JSON.parse(user.preferences)
+          : user.preferences;
+      }
+
+      // Lógica de alternância (Toggle)
+      if (storeKey === 'all') {
+        if (userPreferences.length === DEFAULT_PREFERENCES.length) {
+          userPreferences = [];
+        } else {
+          userPreferences = [...DEFAULT_PREFERENCES];
+        }
+      } else {
+        if (userPreferences.includes(storeKey)) {
+          userPreferences = userPreferences.filter((k) => k !== storeKey);
+        } else {
+          userPreferences.push(storeKey);
+        }
+      }
+
+      // Salva no banco de dados SQLite
+      await updateUserPreferences(chatId, userPreferences);
+
+      // Atualiza o teclado inline com os novos ícones (✅ / ❌)
+      const newKeyboard = buildPreferencesKeyboard(userPreferences);
+
+      await bot.answerCallbackQuery(query.id, {
+        text: storeKey === 'all'
+          ? 'Todas as plataformas foram alternadas!'
+          : `Plataforma atualizada!`
+      });
+
+      await bot.editMessageReplyMarkup(
+        { inline_keyboard: newKeyboard },
+        { chat_id: chatId, message_id: messageId }
+      );
+    } catch (err) {
+      console.error('[Telegram Bot] Erro ao processar callback_query:', err.message);
+      bot.answerCallbackQuery(query.id, { text: 'Erro ao atualizar preferência.' });
+    }
+  });
+
+  console.log('[Telegram Bot] Bot conectado e escutando comandos (/start, /config) e botões Inline...');
 
   // Execução imediata do Worker no boot
   console.log('[Worker] Disparando verificação inicial de jogos gratuitos...');
@@ -87,13 +226,13 @@ app.get('/api/preferences', async (req, res) => {
     if (!user) {
       return res.json({
         success: true,
-        preferences: ['epic', 'steam', 'gog', 'amazon']
+        preferences: DEFAULT_PREFERENCES
       });
     }
 
     const preferences = user.preferences
       ? (typeof user.preferences === 'string' ? JSON.parse(user.preferences) : user.preferences)
-      : ['epic', 'steam', 'gog', 'amazon'];
+      : DEFAULT_PREFERENCES;
 
     res.json({ success: true, preferences });
   } catch (error) {

@@ -2,6 +2,20 @@ const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
+// Lista de lojas padrão suportadas na v2.0
+const DEFAULT_PREFERENCES = [
+  'epic',
+  'steam',
+  'gog',
+  'amazon',
+  'playstation',
+  'xbox',
+  'switch',
+  'itch',
+  'android',
+  'ios'
+];
+
 // Caminho do arquivo de banco de dados SQLite dentro do diretório data
 const dbPath = path.resolve(__dirname, 'data', 'database.sqlite');
 
@@ -24,7 +38,7 @@ db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
       chat_id TEXT PRIMARY KEY,
-      preferences TEXT DEFAULT '["epic", "steam", "gog", "amazon"]'
+      preferences TEXT DEFAULT '${JSON.stringify(DEFAULT_PREFERENCES)}'
     )
   `, (err) => {
     if (err) {
@@ -55,8 +69,9 @@ db.serialize(() => {
  */
 function addUser(chatId, callback) {
   const promise = new Promise((resolve, reject) => {
-    const sql = `INSERT OR IGNORE INTO users (chat_id) VALUES (?)`;
-    db.run(sql, [String(chatId)], function (err) {
+    const defaultPrefsStr = JSON.stringify(DEFAULT_PREFERENCES);
+    const sql = `INSERT OR IGNORE INTO users (chat_id, preferences) VALUES (?, ?)`;
+    db.run(sql, [String(chatId), defaultPrefsStr], function (err) {
       if (err) {
         console.error(`[Database] Erro ao registrar usuário ${chatId}:`, err.message);
         return reject(err);
@@ -200,6 +215,7 @@ function markGameNotified(gameId, callback) {
 
 module.exports = {
   db,
+  DEFAULT_PREFERENCES,
   addUser,
   getUser,
   updateUserPreferences,

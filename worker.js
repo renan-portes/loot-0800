@@ -1,7 +1,7 @@
 const axios = require('axios');
-const { getAllUsers, isGameNotified, markGameNotified } = require('./database');
+const { getAllUsers, isGameNotified, markGameNotified, DEFAULT_PREFERENCES } = require('./database');
 
-const GAMERPOWER_API_URL = 'https://www.gamerpower.com/api/giveaways?platform=pc&type=game';
+const GAMERPOWER_API_URL = 'https://www.gamerpower.com/api/giveaways?type=game';
 const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 jogos por execução
 
 /**
@@ -11,7 +11,7 @@ const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 jogos por execuç�
  */
 function formatGameCaption(game) {
   const originalPrice = game.worth && game.worth !== 'N/A' ? `<s>${game.worth}</s> ➔ <b>GRÁTIS!</b>` : '<b>GRÁTIS!</b>';
-  const platforms = game.platforms || 'PC';
+  const platforms = game.platforms || 'PC / Multiplataforma';
 
   return (
     `🎮 <b>NOVO JOGO GRÁTIS DETECTADO!</b> 🎮\n\n` +
@@ -20,14 +20,14 @@ function formatGameCaption(game) {
     `💰 <b>Preço Original:</b> ${originalPrice}\n` +
     `🔗 <b>Resgate aqui:</b> <a href="${game.open_giveaway_url}">Clique para Resgatar</a>\n\n` +
     `⚡ <i>Aproveite antes que a promoção expire!</i>\n` +
-    `⚙️ <i>Configure suas lojas com /config</i>`
+    `⚙️ <i>Configure seus alertas com /config</i>`
   );
 }
 
 /**
- * Verifica se o jogo corresponde às preferências de lojas selecionadas pelo usuário.
+ * Verifica se o jogo corresponde às preferências de plataformas/lojas selecionadas pelo usuário.
  * @param {object} game - Dados do jogo da API
- * @param {Array<string>} userPreferences - Lista de lojas configuradas pelo usuário
+ * @param {Array<string>} userPreferences - Lista de plataformas configuradas pelo usuário
  * @returns {boolean}
  */
 function isGameMatchingPreferences(game, userPreferences) {
@@ -47,12 +47,39 @@ function isGameMatchingPreferences(game, userPreferences) {
     const p = pref.toLowerCase().trim();
     if (!p) return false;
 
-    // Tratamento para variações de nomes
+    // Mapeamentos específicos para lojas e plataformas
     if (p === 'itch' || p === 'itch.io' || p === 'itchio') {
       return gameContext.includes('itch');
     }
     if (p === 'amazon' || p === 'prime') {
       return gameContext.includes('amazon') || gameContext.includes('prime');
+    }
+    if (p === 'playstation' || p === 'ps4' || p === 'ps5' || p === 'psn') {
+      return (
+        gameContext.includes('playstation') ||
+        gameContext.includes('ps4') ||
+        gameContext.includes('ps5') ||
+        gameContext.includes('psn') ||
+        gameContext.includes('sony')
+      );
+    }
+    if (p === 'xbox' || p === 'xbox-one' || p === 'xbox-series-xs') {
+      return gameContext.includes('xbox') || gameContext.includes('microsoft');
+    }
+    if (p === 'switch' || p === 'nintendo') {
+      return gameContext.includes('switch') || gameContext.includes('nintendo');
+    }
+    if (p === 'android') {
+      return gameContext.includes('android') || gameContext.includes('google play');
+    }
+    if (p === 'ios' || p === 'apple' || p === 'app store') {
+      return (
+        gameContext.includes('ios') ||
+        gameContext.includes('apple') ||
+        gameContext.includes('app store') ||
+        gameContext.includes('iphone') ||
+        gameContext.includes('ipad')
+      );
     }
 
     return gameContext.includes(p);
@@ -74,7 +101,7 @@ async function checkAndNotifyGames(bot) {
   try {
     const response = await axios.get(GAMERPOWER_API_URL, {
       timeout: 10000,
-      headers: { 'User-Agent': 'Loot0800-Bot/1.0' }
+      headers: { 'User-Agent': 'Loot0800-Bot/2.0' }
     });
 
     const games = response.data;
@@ -116,7 +143,7 @@ async function checkAndNotifyGames(bot) {
 
       for (const user of users) {
         // Parse das preferências do usuário (salvas como string JSON no SQLite)
-        let userPreferences = ['epic', 'steam', 'gog', 'amazon'];
+        let userPreferences = DEFAULT_PREFERENCES;
         try {
           if (user.preferences) {
             userPreferences = typeof user.preferences === 'string'
