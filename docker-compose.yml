@@ -8,7 +8,12 @@ services:
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
-      - ./database.sqlite:/app/database.sqlite
+      - loot_data:/app/data
     environment:
       - NODE_ENV=production
       - PUBLIC_URL=https://loot.servidor.xyz.br
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - PORT=${PORT:-3000}
+
+volumes:
+  loot_data:

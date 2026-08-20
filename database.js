@@ -1,14 +1,20 @@
+const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
-// Caminho do arquivo de banco de dados SQLite
-const dbPath = path.resolve(__dirname, 'database.sqlite');
+// Caminho do arquivo de banco de dados SQLite dentro do diretório data
+const dbPath = path.resolve(__dirname, 'data', 'database.sqlite');
+
+// Garante que o diretório data exista antes de abrir a conexão
+if (!fs.existsSync(path.dirname(dbPath))) {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+}
 
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('[Database] Erro ao conectar ao SQLite:', err.message);
   } else {
-    console.log('[Database] Conectado ao banco de dados SQLite (database.sqlite).');
+    console.log('[Database] Conectado ao banco de dados SQLite (data/database.sqlite).');
   }
 });
 
