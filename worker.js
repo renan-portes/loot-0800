@@ -19,12 +19,48 @@ function formatGameCaption(game) {
     `💻 <b>Plataforma:</b> ${platforms}\n` +
     `💰 <b>Preço Original:</b> ${originalPrice}\n` +
     `🔗 <b>Resgate aqui:</b> <a href="${game.open_giveaway_url}">Clique para Resgatar</a>\n\n` +
-    `⚡ <i>Aproveite antes que a promoção expire!</i>`
+    `⚡ <i>Aproveite antes que a promoção expire!</i>\n` +
+    `⚙️ <i>Configure suas lojas com /config</i>`
   );
 }
 
 /**
- * Busca jogos gratuitos na GamerPower API e notifica os usuários cadastrados.
+ * Verifica se o jogo corresponde às preferências de lojas selecionadas pelo usuário.
+ * @param {object} game - Dados do jogo da API
+ * @param {Array<string>} userPreferences - Lista de lojas configuradas pelo usuário
+ * @returns {boolean}
+ */
+function isGameMatchingPreferences(game, userPreferences) {
+  if (!Array.isArray(userPreferences) || userPreferences.length === 0) {
+    return true; // Se não houver preferências definidas, envia por padrão
+  }
+
+  // Se o usuário selecionou "todas"
+  if (userPreferences.some((p) => ['todas', 'all', '*'].includes(p.toLowerCase()))) {
+    return true;
+  }
+
+  // Contexto textual do jogo para busca (plataformas, título e link)
+  const gameContext = `${game.platforms || ''} ${game.title || ''} ${game.open_giveaway_url || ''}`.toLowerCase();
+
+  return userPreferences.some((pref) => {
+    const p = pref.toLowerCase().trim();
+    if (!p) return false;
+
+    // Tratamento para variações de nomes
+    if (p === 'itch' || p === 'itch.io' || p === 'itchio') {
+      return gameContext.includes('itch');
+    }
+    if (p === 'amazon' || p === 'prime') {
+      return gameContext.includes('amazon') || gameContext.includes('prime');
+    }
+
+    return gameContext.includes(p);
+  });
+}
+
+/**
+ * Busca jogos gratuitos na GamerPower API e notifica os usuários cadastrados com base em suas preferências.
  * @param {object} bot - Instância do bot do Telegram
  */
 async function checkAndNotifyGames(bot) {
@@ -72,13 +108,31 @@ async function checkAndNotifyGames(bot) {
       return;
     }
 
-    console.log(`[Worker] Enviando novidades para ${users.length} usuário(s)...`);
+    console.log(`[Worker] Avaliando preferências de ${users.length} usuário(s)...`);
 
-    // 4. Enviar mensagem para cada usuário e registrar o jogo
+    // 4. Enviar mensagem para cada usuário respeitando suas preferências
     for (const game of gamesToNotify) {
       const caption = formatGameCaption(game);
 
       for (const user of users) {
+        // Parse das preferências do usuário (salvas como string JSON no SQLite)
+        let userPreferences = ['epic', 'steam', 'gog', 'amazon'];
+        try {
+          if (user.preferences) {
+            userPreferences = typeof user.preferences === 'string'
+              ? JSON.parse(user.preferences)
+              : user.preferences;
+          }
+        } catch (parseErr) {
+          console.warn(`[Worker] Erro ao parsear preferências do chat_id ${user.chat_id}:`, parseErr.message);
+        }
+
+        // Verifica se o jogo atende às preferências do usuário
+        if (!isGameMatchingPreferences(game, userPreferences)) {
+          console.log(`[Worker] Jogo "${game.title}" ignorado para ${user.chat_id} (lojas do usuário: ${JSON.stringify(userPreferences)})`);
+          continue;
+        }
+
         try {
           if (game.thumbnail) {
             await bot.sendPhoto(user.chat_id, game.thumbnail, {
@@ -90,6 +144,7 @@ async function checkAndNotifyGames(bot) {
               parse_mode: 'HTML'
             });
           }
+          console.log(`[Worker] Drop enviado com sucesso para chat_id ${user.chat_id}: "${game.title}"`);
         } catch (sendErr) {
           console.error(`[Worker] Erro ao enviar jogo "${game.title}" para chat_id ${user.chat_id}:`, sendErr.message);
         }
@@ -97,7 +152,7 @@ async function checkAndNotifyGames(bot) {
 
       // 5. Salva o ID do jogo no banco para não repetir
       await markGameNotified(game.id);
-      console.log(`[Worker] ✅ Jogo "${game.title}" (ID: ${game.id}) notificado e registrado com sucesso.`);
+      console.log(`[Worker] ✅ Jogo "${game.title}" (ID: ${game.id}) registrado no banco de dados.`);
     }
 
     console.log('[Worker] Ciclo de verificação finalizado com sucesso.');
@@ -108,5 +163,6 @@ async function checkAndNotifyGames(bot) {
 
 module.exports = {
   checkAndNotifyGames,
-  formatGameCaption
+  formatGameCaption,
+  isGameMatchingPreferences
 };

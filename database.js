@@ -74,6 +74,57 @@ function addUser(chatId, callback) {
 }
 
 /**
+ * Retorna os dados de um usuário pelo chatId.
+ * @param {string|number} chatId - ID do chat do Telegram
+ * @param {function} [callback] - Callback opcional (err, user)
+ */
+function getUser(chatId, callback) {
+  const promise = new Promise((resolve, reject) => {
+    const sql = `SELECT * FROM users WHERE chat_id = ?`;
+    db.get(sql, [String(chatId)], (err, row) => {
+      if (err) {
+        console.error(`[Database] Erro ao buscar usuário ${chatId}:`, err.message);
+        return reject(err);
+      }
+      resolve(row || null);
+    });
+  });
+
+  if (callback) {
+    promise.then((row) => callback(null, row)).catch((err) => callback(err));
+  }
+  return promise;
+}
+
+/**
+ * Atualiza as preferências de lojas do usuário.
+ * @param {string|number} chatId - ID do chat do Telegram
+ * @param {Array|string} preferences - Array de lojas ou string JSON
+ * @param {function} [callback] - Callback opcional (err, result)
+ */
+function updateUserPreferences(chatId, preferences, callback) {
+  const prefString = Array.isArray(preferences) ? JSON.stringify(preferences) : String(preferences);
+
+  const promise = new Promise((resolve, reject) => {
+    const sql = `UPDATE users SET preferences = ? WHERE chat_id = ?`;
+    db.run(sql, [prefString, String(chatId)], function (err) {
+      if (err) {
+        console.error(`[Database] Erro ao atualizar preferências do usuário ${chatId}:`, err.message);
+        return reject(err);
+      }
+
+      console.log(`[Database] Preferências atualizadas para o usuário ${chatId}: ${prefString}`);
+      resolve({ chatId, preferences: prefString, changes: this.changes });
+    });
+  });
+
+  if (callback) {
+    promise.then((res) => callback(null, res)).catch((err) => callback(err));
+  }
+  return promise;
+}
+
+/**
  * Retorna todos os usuários cadastrados.
  * @param {function} [callback] - Callback opcional (err, rows)
  */
@@ -144,6 +195,8 @@ function markGameNotified(gameId, callback) {
 module.exports = {
   db,
   addUser,
+  getUser,
+  updateUserPreferences,
   getAllUsers,
   isGameNotified,
   markGameNotified
