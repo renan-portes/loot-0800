@@ -13,3 +13,4 @@ services:
       - ./database.sqlite:/app/database.sqlite
     environment:
       - NODE_ENV=production
+      - PUBLIC_URL=https://loot.servidor.xyz.br

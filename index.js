@@ -45,7 +45,8 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
   // Comando /config (Gera link do portal de preferências com o chatId)
   bot.onText(/\/config/, (msg) => {
     const chatId = msg.chat.id;
-    const configUrl = `http://localhost:${PORT}/?chatId=${chatId}`;
+    const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+    const configUrl = `${baseUrl}/?chatId=${chatId}`;
 
     bot.sendMessage(
       chatId,
