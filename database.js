@@ -32,13 +32,16 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
-// Inicialização das tabelas
+// Inicialização das tabelas e migrações seguras
 db.serialize(() => {
-  // 1. Tabela de Usuários
+  // 1. Tabela de Usuários com suporte a Nome, Username e Data de Criação
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
       chat_id TEXT PRIMARY KEY,
-      preferences TEXT DEFAULT '${JSON.stringify(DEFAULT_PREFERENCES)}'
+      preferences TEXT DEFAULT '${JSON.stringify(DEFAULT_PREFERENCES)}',
+      first_name TEXT,
+      username TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `, (err) => {
     if (err) {
@@ -47,6 +50,11 @@ db.serialize(() => {
       console.log('[Database] Tabela "users" pronta para uso.');
     }
   });
+
+  // Migrações seguras de colunas caso a tabela já tenha sido criada em sprints anteriores
+  db.run(`ALTER TABLE users ADD COLUMN first_name TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN username TEXT`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN created_at DATETIME`, () => {});
 
   // 2. Tabela de Jogos Notificados (Anti-Spam / Histórico)
   db.run(`
@@ -63,28 +71,39 @@ db.serialize(() => {
 });
 
 /**
- * Registra um usuário no banco de dados caso ainda não exista.
+ * Registra ou atualiza as informações do usuário (Nome, Username) no banco de dados.
  * @param {string|number} chatId - ID do chat do Telegram
+ * @param {object} [userInfo] - Informações do usuário do Telegram (first_name, username)
  * @param {function} [callback] - Callback opcional (err, result)
  */
-function addUser(chatId, callback) {
+function addUser(chatId, userInfo, callback) {
+  if (typeof userInfo === 'function') {
+    callback = userInfo;
+    userInfo = {};
+  }
+  userInfo = userInfo || {};
+
+  const firstName = userInfo.first_name || userInfo.firstName || null;
+  const username = userInfo.username || null;
+  const defaultPrefsStr = JSON.stringify(DEFAULT_PREFERENCES);
+
   const promise = new Promise((resolve, reject) => {
-    const defaultPrefsStr = JSON.stringify(DEFAULT_PREFERENCES);
-    const sql = `INSERT OR IGNORE INTO users (chat_id, preferences) VALUES (?, ?)`;
-    db.run(sql, [String(chatId), defaultPrefsStr], function (err) {
+    // Insere se não existir ou atualiza nome/username mantendo as preferências existentes
+    const sql = `
+      INSERT INTO users (chat_id, preferences, first_name, username, created_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(chat_id) DO UPDATE SET
+        first_name = COALESCE(excluded.first_name, users.first_name),
+        username = COALESCE(excluded.username, users.username)
+    `;
+
+    db.run(sql, [String(chatId), defaultPrefsStr, firstName, username], function (err) {
       if (err) {
         console.error(`[Database] Erro ao registrar usuário ${chatId}:`, err.message);
         return reject(err);
       }
 
-      const isNew = this.changes > 0;
-      if (isNew) {
-        console.log(`[Database] Novo usuário registrado: ${chatId}`);
-      } else {
-        console.log(`[Database] Usuário já registrado anteriormente: ${chatId}`);
-      }
-
-      resolve({ chatId, isNew });
+      resolve({ chatId, firstName, username });
     });
   });
 
@@ -146,12 +165,12 @@ function updateUserPreferences(chatId, preferences, callback) {
 }
 
 /**
- * Retorna todos os usuários cadastrados.
+ * Retorna todos os usuários cadastrados ordenados por data de criação.
  * @param {function} [callback] - Callback opcional (err, rows)
  */
 function getAllUsers(callback) {
   const promise = new Promise((resolve, reject) => {
-    const sql = `SELECT * FROM users`;
+    const sql = `SELECT * FROM users ORDER BY created_at ASC`;
     db.all(sql, [], (err, rows) => {
       if (err) {
         console.error('[Database] Erro ao buscar usuários:', err.message);

@@ -6,6 +6,7 @@ const cron = require('node-cron');
 const {
   addUser,
   getUser,
+  getAllUsers,
   updateUserPreferences,
   DEFAULT_PREFERENCES
 } = require('./database');
@@ -15,6 +16,7 @@ const { checkAndNotifyGames, sendActiveGamesCatalog } = require('./worker');
 const PORT = process.env.PORT || 3000;
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const DONATION_URL = 'https://pixgg.com.br/rzao';
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '791838687'; // ID do Maestro / Administrador
 
 // Lista de lojas e plataformas para os botões do Telegram
 const STORE_OPTIONS = [
@@ -110,12 +112,17 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     console.log(`[Telegram Bot] Polling error: ${msg}`);
   });
 
-  // Log de diagnóstico de todas as mensagens recebidas de qualquer usuário
+  // Log de diagnóstico e captura de dados do usuário em todas as mensagens recebidas
   bot.on('message', (msg) => {
     const fromUser = msg.from?.username
       ? `@${msg.from.username}`
       : (msg.from?.first_name || 'Desconhecido');
-    console.log(`[Telegram Bot] Mensagem recebida de chat_id ${msg.chat.id} (${fromUser}): "${msg.text || '[mídia/evento]'}"`);
+    console.log(`[Telegram Bot] Mensagem de chat_id ${msg.chat.id} (${fromUser}): "${msg.text || '[mídia/evento]'}"`);
+
+    // Atualiza nome e username no banco em background
+    if (msg.chat.type === 'private') {
+      addUser(msg.chat.id, msg.from).catch(() => {});
+    }
   });
 
   // Comando /start com botões interativos
@@ -126,9 +133,9 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
     console.log(`[Telegram Bot] Executando /start para chat_id ${chatId} (${msg.from?.first_name || 'Usuário'})...`);
 
-    // Registra o usuário no banco de dados (INSERT OR IGNORE)
+    // Registra ou atualiza usuário no banco de dados com nome e username
     try {
-      await addUser(chatId);
+      await addUser(chatId, msg.from);
     } catch (dbErr) {
       console.error(`[Telegram Bot] Erro ao registrar usuário ${chatId}:`, dbErr.message);
     }
@@ -165,7 +172,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
     let userPreferences = DEFAULT_PREFERENCES;
     try {
-      await addUser(chatId);
+      await addUser(chatId, msg.from);
       const user = await getUser(chatId);
       if (user && user.preferences) {
         userPreferences = typeof user.preferences === 'string'
@@ -193,6 +200,45 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
       console.log(`[Telegram Bot] Painel /config enviado com sucesso para chat_id ${chatId}!`);
     } catch (sendErr) {
       console.error(`[Telegram Bot] Erro ao enviar mensagem /config para chat_id ${chatId}:`, sendErr.message);
+    }
+  });
+
+  // Comando /users ou /admin (Exclusivo para o Administrador ver a lista de usuários)
+  bot.onText(/\/(users|admin)/i, async (msg) => {
+    const chatId = String(msg.chat.id);
+
+    // Validação de segurança: apenas o ID do Administrador pode ver a lista
+    if (chatId !== String(ADMIN_CHAT_ID)) {
+      return bot.sendMessage(chatId, '⛔ Comando restrito apenas ao administrador do bot.');
+    }
+
+    try {
+      const users = await getAllUsers();
+      if (!users || users.length === 0) {
+        return bot.sendMessage(chatId, '👥 Nenhum usuário registrado no momento.');
+      }
+
+      let responseText = `👥 <b>USUÁRIOS REGISTRADOS NO LOOT 0800 (${users.length})</b>\n\n`;
+
+      users.forEach((u, index) => {
+        const name = u.first_name || 'Sem nome';
+        const userTag = u.username ? `@${u.username}` : 'sem username';
+
+        let prefCount = 10;
+        try {
+          const parsed = JSON.parse(u.preferences);
+          if (Array.isArray(parsed)) prefCount = parsed.length;
+        } catch (_) {}
+
+        responseText += `<b>${index + 1}.</b> 👤 <b>${name}</b> (${userTag})\n`;
+        responseText += `   🆔 ID: <code>${u.chat_id}</code>\n`;
+        responseText += `   🎯 Plataformas: ${prefCount}/10 ativas\n\n`;
+      });
+
+      await bot.sendMessage(chatId, responseText, { parse_mode: 'HTML' });
+    } catch (err) {
+      console.error('[Telegram Bot] Erro ao listar usuários no comando /users:', err.message);
+      bot.sendMessage(chatId, '❌ Ocorreu um erro ao consultar os usuários no banco de dados.');
     }
   });
 
@@ -225,7 +271,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
       const configUrl = `${baseUrl}/?chatId=${chatId}`;
 
       try {
-        await addUser(chatId);
+        await addUser(chatId, query.from);
         const user = await getUser(chatId);
         let userPreferences = DEFAULT_PREFERENCES;
 
@@ -273,7 +319,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     }
   });
 
-  console.log('[Telegram Bot] Bot conectado e escutando comandos (/start, /config) e botões Inline...');
+  console.log('[Telegram Bot] Bot conectado e escutando comandos (/start, /config, /users) e botões Inline...');
 
   // Execução imediata do Worker no boot
   console.log('[Worker] Disparando verificação inicial de jogos gratuitos...');
