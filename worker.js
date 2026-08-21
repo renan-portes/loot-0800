@@ -8,6 +8,7 @@ const {
 } = require('./database');
 
 const GAMERPOWER_API_URL = 'https://www.gamerpower.com/api/giveaways?type=game';
+const DONATION_URL = 'https://pixgg.com.br/rzao';
 const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 jogos por execução periódica
 
 /**
@@ -292,11 +293,17 @@ async function sendActiveGamesCatalog(bot, chatId) {
     }
 
     message += `⚡ <i>Toque no nome do jogo para abrir a página de resgate!</i>\n`;
-    message += `⚙️ <i>Personalize suas lojas com /config</i>`;
+    message += `⚙️ <i>Personalize suas lojas com /config</i>\n\n`;
+    message += `💖 <i>Gostou do Loot 0800? <a href="${DONATION_URL}">Apoie o projeto com um café via Pix!</a></i>`;
 
     await bot.sendMessage(chatId, message, {
       parse_mode: 'HTML',
-      disable_web_page_preview: true
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '☕ Apoiar o Loot 0800 via Pix', url: DONATION_URL }]
+        ]
+      }
     });
   } catch (error) {
     console.error(`[Worker] Erro ao gerar catálogo de jogos ativos para ${chatId}:`, error.message);

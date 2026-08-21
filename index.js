@@ -14,6 +14,7 @@ const { checkAndNotifyGames, sendActiveGamesCatalog } = require('./worker');
 // Configurações de ambiente
 const PORT = process.env.PORT || 3000;
 const token = process.env.TELEGRAM_BOT_TOKEN;
+const DONATION_URL = 'https://pixgg.com.br/rzao';
 
 // Lista de lojas e plataformas para os botões do Telegram
 const STORE_OPTIONS = [
@@ -30,7 +31,7 @@ const STORE_OPTIONS = [
 ];
 
 /**
- * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja e atalho para ver todos os ativos.
+ * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja, atalho de catálogo e botão de apoio.
  * @param {Array<string>} userPreferences - Lista de preferências do usuário
  * @returns {Array<Array<object>>} - Matriz de botões para o Telegram
  */
@@ -67,6 +68,10 @@ function buildPreferencesKeyboard(userPreferences) {
     { text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }
   ]);
 
+  rows.push([
+    { text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }
+  ]);
+
   return rows;
 }
 
@@ -95,7 +100,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     console.log(`[Telegram Bot] Polling error: ${msg}`);
   });
 
-  // Comando /start com botão interativo para ver o catálogo de todos os jogos ativos
+  // Comando /start com botão interativo para ver o catálogo de todos os jogos ativos e apoiar
   bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
 
@@ -113,7 +118,8 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }]
+            [{ text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }],
+            [{ text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }]
           ]
         }
       }

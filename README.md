@@ -8,11 +8,13 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker)](docker-compose.yml)
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?style=for-the-badge&logo=nodedotjs)](package.json)
 [![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=for-the-badge&logo=sqlite)](database.js)
+[![Apoie no Pix](https://img.shields.io/badge/☕_Apoie_via_Pix-pixgg.com.br/rzao-32BCAD?style=for-the-badge)](https://pixgg.com.br/rzao)
 
 <br/>
 
 **🔗 Acesse o Portal Oficial:** [https://loot.servidor.xyz.br](https://loot.servidor.xyz.br)  
-**🤖 Converse com o Bot:** [@Loot0800Bot no Telegram](https://t.me/Loot0800Bot)
+**🤖 Converse com o Bot:** [@Loot0800Bot no Telegram](https://t.me/Loot0800Bot)  
+**☕ Apoie o Projeto:** [https://pixgg.com.br/rzao](https://pixgg.com.br/rzao)
 
 <br/>
 
