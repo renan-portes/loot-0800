@@ -8,10 +8,10 @@ const {
 } = require('./database');
 
 const GAMERPOWER_API_URL = 'https://www.gamerpower.com/api/giveaways?type=game';
-const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 jogos por execução
+const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 jogos por execução periódica
 
 /**
- * Monta o texto chamativo da legenda da mensagem no Telegram.
+ * Monta o texto chamativo da legenda da mensagem individual no Telegram.
  * @param {object} game - Dados do jogo vindos da API
  * @returns {string} - Legenda formatada em HTML
  */
@@ -195,11 +195,11 @@ async function checkAndNotifyGames(bot) {
 }
 
 /**
- * Busca os jogos ativos mais recentes na GamerPower API e envia diretamente para um usuário específico (on-demand).
+ * Constrói e envia o catálogo completo de todos os jogos ativos agrupados por loja/plataforma em mensagem única.
  * @param {object} bot - Instância do bot do Telegram
  * @param {string|number} chatId - ID do chat do Telegram
  */
-async function sendRecentGamesToUser(bot, chatId) {
+async function sendActiveGamesCatalog(bot, chatId) {
   if (!bot || !chatId) return;
 
   try {
@@ -237,38 +237,80 @@ async function sendRecentGamesToUser(bot, chatId) {
       return;
     }
 
-    // Seleciona os 3 primeiros jogos ativos
-    const gamesToSend = matchingGames.slice(0, 3);
+    // Agrupamento estruturado por plataformas
+    const categories = {
+      '🟣 Epic Games Store': [],
+      '🔵 Steam': [],
+      '👾 GOG.com': [],
+      '📦 Prime Gaming': [],
+      '🎮 PlayStation': [],
+      '🟢 Xbox': [],
+      '🔴 Nintendo Switch': [],
+      '📱 Mobile (Android / iOS)': [],
+      '🕹️ Itch.io': [],
+      '💻 Outras Lojas / DRM-Free': []
+    };
 
-    for (const game of gamesToSend) {
-      const caption = formatGameCaption(game);
-      try {
-        if (game.thumbnail) {
-          await bot.sendPhoto(chatId, game.thumbnail, {
-            caption,
-            parse_mode: 'HTML'
-          });
-        } else {
-          await bot.sendMessage(chatId, caption, {
-            parse_mode: 'HTML'
-          });
-        }
-      } catch (err) {
-        console.error(`[Worker] Erro ao enviar jogo recente para ${chatId}:`, err.message);
+    matchingGames.forEach((g) => {
+      const text = `${g.platforms || ''} ${g.title || ''} ${g.open_giveaway_url || ''}`.toLowerCase();
+      if (text.includes('epic')) {
+        categories['🟣 Epic Games Store'].push(g);
+      } else if (text.includes('steam')) {
+        categories['🔵 Steam'].push(g);
+      } else if (text.includes('gog')) {
+        categories['👾 GOG.com'].push(g);
+      } else if (text.includes('amazon') || text.includes('prime')) {
+        categories['📦 Prime Gaming'].push(g);
+      } else if (text.includes('playstation') || text.includes('ps4') || text.includes('ps5') || text.includes('psn')) {
+        categories['🎮 PlayStation'].push(g);
+      } else if (text.includes('xbox')) {
+        categories['🟢 Xbox'].push(g);
+      } else if (text.includes('switch') || text.includes('nintendo')) {
+        categories['🔴 Nintendo Switch'].push(g);
+      } else if (text.includes('android') || text.includes('ios') || text.includes('apple') || text.includes('mobile')) {
+        categories['📱 Mobile (Android / iOS)'].push(g);
+      } else if (text.includes('itch')) {
+        categories['🕹️ Itch.io'].push(g);
+      } else {
+        categories['💻 Outras Lojas / DRM-Free'].push(g);
+      }
+    });
+
+    let message = `🎮 <b>CATÁLOGO DE JOGOS GRÁTIS ATIVOS</b> 🎮\n`;
+    message += `<i>Encontramos <b>${matchingGames.length}</b> jogo(s) 100% gratuito(s) para resgatar agora:</i>\n\n`;
+
+    for (const [catName, list] of Object.entries(categories)) {
+      if (list.length > 0) {
+        message += `<b>${catName} (${list.length})</b>\n`;
+        list.forEach((game) => {
+          const cleanTitle = game.title.replace(/\s*Giveaway\s*/gi, '').trim();
+          const originalPrice = game.worth && game.worth !== 'N/A' ? `<s>${game.worth}</s> ➔ <b>GRÁTIS</b>` : '<b>GRÁTIS</b>';
+          message += `• <a href="${game.open_giveaway_url}">${cleanTitle}</a> — ${originalPrice}\n`;
+        });
+        message += '\n';
       }
     }
+
+    message += `⚡ <i>Toque no nome do jogo para abrir a página de resgate!</i>\n`;
+    message += `⚙️ <i>Personalize suas lojas com /config</i>`;
+
+    await bot.sendMessage(chatId, message, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    });
   } catch (error) {
-    console.error(`[Worker] Erro ao buscar jogos recentes para ${chatId}:`, error.message);
+    console.error(`[Worker] Erro ao gerar catálogo de jogos ativos para ${chatId}:`, error.message);
     await bot.sendMessage(
       chatId,
-      '❌ Ocorreu uma instabilidade momentânea ao consultar os drops. Tente novamente em alguns instantes!'
+      '❌ Ocorreu uma instabilidade ao consultar os drops. Tente novamente em alguns instantes!'
     );
   }
 }
 
 module.exports = {
   checkAndNotifyGames,
-  sendRecentGamesToUser,
+  sendActiveGamesCatalog,
+  sendRecentGamesToUser: sendActiveGamesCatalog, // Alias para compatibilidade
   formatGameCaption,
   isGameMatchingPreferences
 };

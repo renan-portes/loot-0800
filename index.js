@@ -9,7 +9,7 @@ const {
   updateUserPreferences,
   DEFAULT_PREFERENCES
 } = require('./database');
-const { checkAndNotifyGames, sendRecentGamesToUser } = require('./worker');
+const { checkAndNotifyGames, sendActiveGamesCatalog } = require('./worker');
 
 // Configurações de ambiente
 const PORT = process.env.PORT || 3000;
@@ -30,7 +30,7 @@ const STORE_OPTIONS = [
 ];
 
 /**
- * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja e atalho de recentes.
+ * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja e atalho para ver todos os ativos.
  * @param {Array<string>} userPreferences - Lista de preferências do usuário
  * @returns {Array<Array<object>>} - Matriz de botões para o Telegram
  */
@@ -64,7 +64,7 @@ function buildPreferencesKeyboard(userPreferences) {
   ]);
 
   rows.push([
-    { text: '🎁 Ver Jogos Recentes agora', callback_data: 'get_recent_games' }
+    { text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }
   ]);
 
   return rows;
@@ -95,7 +95,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     console.log(`[Telegram Bot] Polling error: ${msg}`);
   });
 
-  // Comando /start com botão interativo de onboarding para ver jogos recentes
+  // Comando /start com botão interativo para ver o catálogo de todos os jogos ativos
   bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
 
@@ -109,11 +109,11 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     bot.sendMessage(
       chatId,
       `Bem-vindo ao Loot 0800! 🎮 O seu radar de jogos grátis está online. Seu ID foi registrado com sucesso!\n\n` +
-      `⚡ Clique no botão abaixo para conferir os melhores drops ativos agora ou digite /config para personalizar suas plataformas.`,
+      `⚡ Clique no botão abaixo para ver **todos os jogos 100% gratuitos ativos agora** ou digite /config para personalizar suas plataformas.`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🎁 Ver Jogos Recentes agora', callback_data: 'get_recent_games' }]
+            [{ text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }]
           ]
         }
       }
@@ -163,21 +163,16 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
     if (!data) return;
 
-    // Ação: Buscar jogos recentes instantaneamente
+    // Ação: Buscar catálogo completo de todos os jogos ativos
     if (data === 'get_recent_games') {
       try {
         await bot.answerCallbackQuery(query.id, {
-          text: 'Buscando os melhores drops para você...'
+          text: 'Compilando catálogo de jogos ativos...'
         });
 
-        await bot.sendMessage(
-          chatId,
-          '🔍 Buscando os melhores drops ativos para você no momento...'
-        );
-
-        await sendRecentGamesToUser(bot, chatId);
+        await sendActiveGamesCatalog(bot, chatId);
       } catch (err) {
-        console.error('[Telegram Bot] Erro ao buscar jogos recentes:', err.message);
+        console.error('[Telegram Bot] Erro ao enviar catálogo de jogos:', err.message);
       }
       return;
     }
