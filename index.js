@@ -110,40 +110,58 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     console.log(`[Telegram Bot] Polling error: ${msg}`);
   });
 
+  // Log de diagnóstico de todas as mensagens recebidas de qualquer usuário
+  bot.on('message', (msg) => {
+    const fromUser = msg.from?.username
+      ? `@${msg.from.username}`
+      : (msg.from?.first_name || 'Desconhecido');
+    console.log(`[Telegram Bot] Mensagem recebida de chat_id ${msg.chat.id} (${fromUser}): "${msg.text || '[mídia/evento]'}"`);
+  });
+
   // Comando /start com botões interativos
-  bot.onText(/\/start/, (msg) => {
+  bot.onText(/\/start/i, async (msg) => {
     const chatId = msg.chat.id;
     const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
     const configUrl = `${baseUrl}/?chatId=${chatId}`;
 
-    // Registra o usuário no banco de dados (INSERT OR IGNORE)
-    addUser(chatId, (err) => {
-      if (err) {
-        console.error(`[Telegram Bot] Erro ao registrar usuário ${chatId}:`, err.message);
-      }
-    });
+    console.log(`[Telegram Bot] Executando /start para chat_id ${chatId} (${msg.from?.first_name || 'Usuário'})...`);
 
-    bot.sendMessage(
-      chatId,
-      `Bem-vindo ao Loot 0800! 🎮 O seu radar de jogos grátis está online. Seu ID foi registrado com sucesso!\n\n` +
-      `⚡ Use os botões abaixo para ver os jogos ativos, configurar suas lojas ou abrir o portal Web.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }],
-            [{ text: '🌐 Abrir Portal Web de Configuração', url: configUrl }],
-            [{ text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }]
-          ]
+    // Registra o usuário no banco de dados (INSERT OR IGNORE)
+    try {
+      await addUser(chatId);
+    } catch (dbErr) {
+      console.error(`[Telegram Bot] Erro ao registrar usuário ${chatId}:`, dbErr.message);
+    }
+
+    try {
+      await bot.sendMessage(
+        chatId,
+        `Bem-vindo ao Loot 0800! 🎮 O seu radar de jogos grátis está online. Seu ID foi registrado com sucesso!\n\n` +
+        `⚡ Use os botões abaixo para ver os jogos ativos, configurar suas lojas ou abrir o portal Web.`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }],
+              [{ text: '🌐 Abrir Portal Web de Configuração', url: configUrl }],
+              [{ text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }]
+            ]
+          }
         }
-      }
-    );
+      );
+      console.log(`[Telegram Bot] Boas-vindas enviadas com sucesso para chat_id ${chatId}!`);
+    } catch (sendErr) {
+      console.error(`[Telegram Bot] Erro ao enviar mensagem /start para chat_id ${chatId}:`, sendErr.message);
+    }
   });
 
   // Comando /config (Envia painel com botões inline interativos e botão de Portal Web)
-  bot.onText(/\/config/, async (msg) => {
+  bot.onText(/\/config/i, async (msg) => {
     const chatId = msg.chat.id;
     const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
     const configUrl = `${baseUrl}/?chatId=${chatId}`;
+
+    console.log(`[Telegram Bot] Executando /config para chat_id ${chatId}...`);
 
     let userPreferences = DEFAULT_PREFERENCES;
     try {
@@ -160,17 +178,22 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
     const keyboard = buildPreferencesKeyboard(userPreferences, configUrl);
 
-    bot.sendMessage(
-      chatId,
-      `⚙️ <b>Painel de Preferências - Loot 0800</b>\n\n` +
-      `Toque nos botões abaixo para ativar/desativar plataformas diretamente no Telegram, ou abra o portal web no navegador:`,
-      {
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: keyboard
+    try {
+      await bot.sendMessage(
+        chatId,
+        `⚙️ <b>Painel de Preferências - Loot 0800</b>\n\n` +
+        `Toque nos botões abaixo para ativar/desativar plataformas diretamente no Telegram, ou abra o portal web no navegador:`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: keyboard
+          }
         }
-      }
-    );
+      );
+      console.log(`[Telegram Bot] Painel /config enviado com sucesso para chat_id ${chatId}!`);
+    } catch (sendErr) {
+      console.error(`[Telegram Bot] Erro ao enviar mensagem /config para chat_id ${chatId}:`, sendErr.message);
+    }
   });
 
   // Interceptador de cliques nos botões Inline Keyboard
