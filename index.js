@@ -81,7 +81,18 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
   // Tratador global de erro de polling para evitar poluição no console em instabilidades
   bot.on('polling_error', (err) => {
-    console.log(`[Telegram Bot] Polling error: ${err.message}`);
+    const msg = err.message || '';
+    // Ignora timeouts e desconexões normais de conexão ociosa do Long Polling
+    if (
+      msg.includes('ETIMEDOUT') ||
+      msg.includes('ECONNRESET') ||
+      msg.includes('ESOCKETTIMEDOUT') ||
+      msg.includes('socket hang up') ||
+      err.code === 'EFATAL'
+    ) {
+      return;
+    }
+    console.log(`[Telegram Bot] Polling error: ${msg}`);
   });
 
   // Comando /start com botão interativo de onboarding para ver jogos recentes
