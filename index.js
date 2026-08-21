@@ -16,7 +16,7 @@ const { checkAndNotifyGames, sendActiveGamesCatalog } = require('./worker');
 const PORT = process.env.PORT || 3000;
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const DONATION_URL = 'https://pixgg.com.br/rzao';
-const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '791838687'; // ID do Maestro / Administrador
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '791838687'; // ID do Administrador
 
 // Lista de lojas e plataformas para os botões do Telegram
 const STORE_OPTIONS = [
@@ -33,15 +33,46 @@ const STORE_OPTIONS = [
 ];
 
 /**
- * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja, portal web, atalho de catálogo e botão de apoio.
+ * Constrói o layout do teclado inline com Tipos de Conteúdo, Lojas, Portal Web e Apoio.
  * @param {Array<string>} userPreferences - Lista de preferências do usuário
  * @param {string} [configUrl] - URL do portal Web com chatId
  * @returns {Array<Array<object>>} - Matriz de botões para o Telegram
  */
 function buildPreferencesKeyboard(userPreferences, configUrl) {
-  const prefs = Array.isArray(userPreferences) ? userPreferences : DEFAULT_PREFERENCES;
+  let prefs = Array.isArray(userPreferences) ? [...userPreferences] : [...DEFAULT_PREFERENCES];
+
+  // Compatibilidade retroativa: se não houver type:*, adiciona type:game
+  const hasType = prefs.some((p) => p.startsWith('type:'));
+  if (!hasType) {
+    prefs.push('type:game');
+  }
+
   const rows = [];
 
+  // Seção 1: Tipos de Conteúdo (Jogos, Loots, Betas)
+  const isGameChecked = prefs.includes('type:game');
+  const isLootChecked = prefs.includes('type:loot');
+  const isBetaChecked = prefs.includes('type:beta');
+
+  rows.push([
+    {
+      text: `${isGameChecked ? '✅' : '❌'} 🎮 Jogos Completos`,
+      callback_data: 'toggle:type:game'
+    }
+  ]);
+
+  rows.push([
+    {
+      text: `${isLootChecked ? '✅' : '❌'} 🎁 DLCs & Loots`,
+      callback_data: 'toggle:type:loot'
+    },
+    {
+      text: `${isBetaChecked ? '✅' : '❌'} 🔑 Betas & Testes`,
+      callback_data: 'toggle:type:beta'
+    }
+  ]);
+
+  // Seção 2: Lojas e Plataformas
   for (let i = 0; i < STORE_OPTIONS.length; i += 2) {
     const row = [];
     const s1 = STORE_OPTIONS[i];
@@ -62,24 +93,21 @@ function buildPreferencesKeyboard(userPreferences, configUrl) {
     rows.push(row);
   }
 
-  // Botão de alternar todas as plataformas
+  // Ações Rápidas
   rows.push([
-    { text: '✨ Marcar / Desmarcar Todas', callback_data: 'toggle:all' }
+    { text: '✨ Alternar Todas as Lojas', callback_data: 'toggle:all_stores' }
   ]);
 
-  // Botão chamativo para abrir o portal Web (se a URL for fornecida)
   if (configUrl) {
     rows.push([
       { text: '🌐 Abrir Portal Web no Navegador', url: configUrl }
     ]);
   }
 
-  // Botão para ver todos os jogos ativos agora
   rows.push([
-    { text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }
+    { text: '🎁 Ver Todos os Drops Ativos Agora', callback_data: 'get_recent_games' }
   ]);
 
-  // Botão de apoio ao projeto
   rows.push([
     { text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }
   ]);
@@ -133,7 +161,6 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
     console.log(`[Telegram Bot] Executando /start para chat_id ${chatId} (${msg.from?.first_name || 'Usuário'})...`);
 
-    // Registra ou atualiza usuário no banco de dados com nome e username
     try {
       await addUser(chatId, msg.from);
     } catch (dbErr) {
@@ -143,13 +170,13 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     try {
       await bot.sendMessage(
         chatId,
-        `Bem-vindo ao Loot 0800! 🎮 O seu radar de jogos grátis está online. Seu ID foi registrado com sucesso!\n\n` +
-        `⚡ Use os botões abaixo para ver os jogos ativos, configurar suas lojas ou abrir o portal Web.`,
+        `Bem-vindo ao Loot 0800! 🎮 O seu radar de jogos, DLCs e betas grátis está online.\n\n` +
+        `⚡ Use os botões abaixo para conferir os drops ativos, personalizar suas plataformas e tipos de alerta ou abrir o portal Web.`,
         {
           parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }],
+              [{ text: '🎁 Ver Todos os Drops Ativos Agora', callback_data: 'get_recent_games' }],
               [{ text: '🌐 Abrir Portal Web de Configuração', url: configUrl }],
               [{ text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }]
             ]
@@ -162,7 +189,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     }
   });
 
-  // Comando /config (Envia painel com botões inline interativos e botão de Portal Web)
+  // Comando /config (Painel com Tipos de Conteúdo + Lojas + Botões)
   bot.onText(/\/config/i, async (msg) => {
     const chatId = msg.chat.id;
     const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -189,7 +216,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
       await bot.sendMessage(
         chatId,
         `⚙️ <b>Painel de Preferências - Loot 0800</b>\n\n` +
-        `Toque nos botões abaixo para ativar/desativar plataformas diretamente no Telegram, ou abra o portal web no navegador:`,
+        `Escolha os <b>Tipos de Conteúdo</b> e as <b>Lojas</b> que você quer monitorar:`,
         {
           parse_mode: 'HTML',
           reply_markup: {
@@ -203,7 +230,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     }
   });
 
-  // Comando /users ou /admin (Exclusivo para o Administrador ver a lista de usuários)
+  // Comando /users ou /admin (Exclusivo para o Administrador ver a lista de usuários com links diretos)
   bot.onText(/\/(users|admin)/i, async (msg) => {
     const chatId = String(msg.chat.id);
 
@@ -222,15 +249,18 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
       users.forEach((u, index) => {
         const name = u.first_name || 'Sem nome';
+        const userLink = `<a href="tg://user?id=${u.chat_id}">${name}</a>`;
         const userTag = u.username ? `@${u.username}` : 'sem username';
 
         let prefCount = 10;
         try {
           const parsed = JSON.parse(u.preferences);
-          if (Array.isArray(parsed)) prefCount = parsed.length;
+          if (Array.isArray(parsed)) {
+            prefCount = parsed.filter((p) => !p.startsWith('type:')).length;
+          }
         } catch (_) {}
 
-        responseText += `<b>${index + 1}.</b> 👤 <b>${name}</b> (${userTag})\n`;
+        responseText += `<b>${index + 1}.</b> 👤 <b>${userLink}</b> (${userTag})\n`;
         responseText += `   🆔 ID: <code>${u.chat_id}</code>\n`;
         responseText += `   🎯 Plataformas: ${prefCount}/10 ativas\n\n`;
       });
@@ -250,11 +280,11 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
 
     if (!data) return;
 
-    // Ação: Buscar catálogo completo de todos os jogos ativos
+    // Ação: Buscar catálogo completo de todos os drops ativos
     if (data === 'get_recent_games') {
       try {
         await bot.answerCallbackQuery(query.id, {
-          text: 'Compilando catálogo de jogos ativos...'
+          text: 'Compilando catálogo de drops ativos...'
         });
 
         await sendActiveGamesCatalog(bot, chatId);
@@ -264,9 +294,9 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
       return;
     }
 
-    // Ação: Alternar preferências de plataformas
+    // Ação: Alternar preferências (Lojas ou Tipos de Conteúdo)
     if (data.startsWith('toggle:')) {
-      const storeKey = data.replace('toggle:', '');
+      const targetKey = data.replace('toggle:', '');
       const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
       const configUrl = `${baseUrl}/?chatId=${chatId}`;
 
@@ -281,18 +311,28 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
             : user.preferences;
         }
 
+        // Garante array
+        if (!Array.isArray(userPreferences)) {
+          userPreferences = [...DEFAULT_PREFERENCES];
+        }
+
         // Lógica de alternância (Toggle)
-        if (storeKey === 'all') {
-          if (userPreferences.length === DEFAULT_PREFERENCES.length) {
-            userPreferences = [];
+        if (targetKey === 'all_stores' || targetKey === 'all') {
+          const storeIds = STORE_OPTIONS.map((s) => s.id);
+          const currentStores = userPreferences.filter((p) => !p.startsWith('type:'));
+          const typePrefs = userPreferences.filter((p) => p.startsWith('type:'));
+
+          if (currentStores.length === storeIds.length) {
+            userPreferences = [...typePrefs]; // Desmarca todas as lojas mantendo os tipos
           } else {
-            userPreferences = [...DEFAULT_PREFERENCES];
+            userPreferences = [...typePrefs, ...storeIds]; // Marca todas as lojas
           }
         } else {
-          if (userPreferences.includes(storeKey)) {
-            userPreferences = userPreferences.filter((k) => k !== storeKey);
+          // Toggle individual (seja loja ou type:*)
+          if (userPreferences.includes(targetKey)) {
+            userPreferences = userPreferences.filter((k) => k !== targetKey);
           } else {
-            userPreferences.push(storeKey);
+            userPreferences.push(targetKey);
           }
         }
 
@@ -303,9 +343,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
         const newKeyboard = buildPreferencesKeyboard(userPreferences, configUrl);
 
         await bot.answerCallbackQuery(query.id, {
-          text: storeKey === 'all'
-            ? 'Todas as plataformas foram alternadas!'
-            : `Plataforma atualizada!`
+          text: targetKey.startsWith('type:') ? 'Tipo de alerta atualizado!' : 'Plataforma atualizada!'
         });
 
         await bot.editMessageReplyMarkup(
@@ -322,12 +360,12 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
   console.log('[Telegram Bot] Bot conectado e escutando comandos (/start, /config, /users) e botões Inline...');
 
   // Execução imediata do Worker no boot
-  console.log('[Worker] Disparando verificação inicial de jogos gratuitos...');
+  console.log('[Worker] Disparando verificação inicial de oportunidades gratuitas...');
   checkAndNotifyGames(bot);
 
   // Agendamento do Worker via Cron (roda a cada hora: 0 * * * *)
   cron.schedule('0 * * * *', () => {
-    console.log('[Cron] Executando busca periódica horária de jogos gratuitos...');
+    console.log('[Cron] Executando busca periódica horária de oportunidades gratuitas...');
     checkAndNotifyGames(bot);
   });
 }

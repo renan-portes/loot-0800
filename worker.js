@@ -7,21 +7,58 @@ const {
   DEFAULT_PREFERENCES
 } = require('./database');
 
-const GAMERPOWER_API_URL = 'https://www.gamerpower.com/api/giveaways?type=game';
+const GAMERPOWER_API_URL = 'https://www.gamerpower.com/api/giveaways';
 const DONATION_URL = 'https://pixgg.com.br/rzao';
-const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 jogos por execução periódica
+const MAX_GAMES_PER_RUN = 3; // Regra Anti-Spam: no máximo 3 itens por ciclo automático
 
 /**
- * Monta o texto chamativo da legenda da mensagem individual no Telegram.
- * @param {object} game - Dados do jogo vindos da API
+ * Identifica se a oportunidade é um teste temporário ou Fim de Semana Grátis (Free Weekend).
+ * @param {object} game - Dados da oportunidade
+ * @returns {boolean}
+ */
+function isTemporaryOrFreeWeekend(game) {
+  const text = `${game.title || ''} ${game.description || ''} ${game.instructions || ''}`.toLowerCase();
+  return (
+    text.includes('free weekend') ||
+    text.includes('fim de semana') ||
+    text.includes('weekend free') ||
+    text.includes('play for free') ||
+    text.includes('free to play for') ||
+    text.includes('free trial') ||
+    text.includes('temporary')
+  );
+}
+
+/**
+ * Monta o cabeçalho e texto chamativo do card no Telegram de acordo com o tipo de conteúdo.
+ * @param {object} game - Dados do item vindos da API
  * @returns {string} - Legenda formatada em HTML
  */
 function formatGameCaption(game) {
   const originalPrice = game.worth && game.worth !== 'N/A' ? `<s>${game.worth}</s> ➔ <b>GRÁTIS!</b>` : '<b>GRÁTIS!</b>';
   const platforms = game.platforms || 'PC / Multiplataforma';
+  const isTemp = isTemporaryOrFreeWeekend(game);
+
+  let header = `🎮 <b>NOVO JOGO GRÁTIS DETECTADO!</b> 🎮\n\n`;
+  let subHeader = '';
+
+  const itemType = (game.type || 'Game').toLowerCase();
+
+  if (isTemp) {
+    header = `⏳ <b>FIM DE SEMANA GRÁTIS / TESTE TEMPORÁRIO!</b> ⏳\n\n`;
+    if (game.end_date && game.end_date !== 'N/A') {
+      subHeader = `⏰ <i>Jogue de graça por tempo limitado (Válido até: ${game.end_date})!</i>\n\n`;
+    } else {
+      subHeader = `⏰ <i>Jogue de graça por tempo limitado!</i>\n\n`;
+    }
+  } else if (itemType.includes('dlc') || itemType.includes('loot') || itemType.includes('other')) {
+    header = `🎁 <b>NOVO LOOT / DLC GRÁTIS!</b> 🎁\n\n`;
+  } else if (itemType.includes('early access') || itemType.includes('beta')) {
+    header = `🔑 <b>NOVA CHAVE DE BETA / ACESSO ANTECIPADO!</b> 🔑\n\n`;
+  }
 
   return (
-    `🎮 <b>NOVO JOGO GRÁTIS DETECTADO!</b> 🎮\n\n` +
+    `${header}${subHeader}` +
     `🕹️ <b>Título:</b> ${game.title}\n` +
     `💻 <b>Plataforma:</b> ${platforms}\n` +
     `💰 <b>Preço Original:</b> ${originalPrice}\n` +
@@ -32,29 +69,55 @@ function formatGameCaption(game) {
 }
 
 /**
- * Verifica se o jogo corresponde às preferências de plataformas/lojas selecionadas pelo usuário.
- * @param {object} game - Dados do jogo da API
- * @param {Array<string>} userPreferences - Lista de plataformas configuradas pelo usuário
+ * Verifica se a oportunidade corresponde aos Tipos de Conteúdo e Lojas selecionadas pelo usuário.
+ * @param {object} game - Dados da oportunidade da API
+ * @param {Array<string>} userPreferences - Lista de preferências configuradas pelo usuário
  * @returns {boolean}
  */
 function isGameMatchingPreferences(game, userPreferences) {
   if (!Array.isArray(userPreferences) || userPreferences.length === 0) {
-    return true; // Se não houver preferências definidas, envia por padrão
+    return true;
   }
 
+  // 1. Filtragem por Tipo de Conteúdo (Jogos, Loots/DLCs, Betas)
+  const hasTypeFilter = userPreferences.some((p) => p.startsWith('type:'));
+  const wantsGames = hasTypeFilter ? userPreferences.includes('type:game') : true; // Default true para compatibilidade
+  const wantsLoot = userPreferences.includes('type:loot');
+  const wantsBeta = userPreferences.includes('type:beta');
+
+  const itemType = (game.type || 'Game').toLowerCase();
+
+  let matchesType = false;
+  if (itemType.includes('early access') || itemType.includes('beta')) {
+    matchesType = wantsBeta;
+  } else if (itemType.includes('dlc') || itemType.includes('loot') || itemType.includes('other')) {
+    matchesType = wantsLoot;
+  } else {
+    // Tipo 'Game' ou padrão
+    matchesType = wantsGames;
+  }
+
+  if (!matchesType) {
+    return false;
+  }
+
+  // 2. Filtragem por Plataforma / Loja
   // Se o usuário selecionou "todas"
   if (userPreferences.some((p) => ['todas', 'all', '*'].includes(p.toLowerCase()))) {
     return true;
   }
 
-  // Contexto textual do jogo para busca (plataformas, título e link)
   const gameContext = `${game.platforms || ''} ${game.title || ''} ${game.open_giveaway_url || ''}`.toLowerCase();
 
-  return userPreferences.some((pref) => {
+  const storePreferences = userPreferences.filter((p) => !p.startsWith('type:'));
+  if (storePreferences.length === 0) {
+    return true; // Se não escolheu nenhuma loja específica, aceita todas
+  }
+
+  return storePreferences.some((pref) => {
     const p = pref.toLowerCase().trim();
     if (!p) return false;
 
-    // Mapeamentos específicos para lojas e plataformas
     if (p === 'itch' || p === 'itch.io' || p === 'itchio') {
       return gameContext.includes('itch');
     }
@@ -94,7 +157,7 @@ function isGameMatchingPreferences(game, userPreferences) {
 }
 
 /**
- * Busca jogos gratuitos na GamerPower API e notifica os usuários cadastrados com base em suas preferências (Ciclo Automático).
+ * Busca todas as oportunidades na GamerPower API e notifica os usuários cadastrados (Ciclo Automático).
  * @param {object} bot - Instância do bot do Telegram
  */
 async function checkAndNotifyGames(bot) {
@@ -103,21 +166,21 @@ async function checkAndNotifyGames(bot) {
     return;
   }
 
-  console.log('[Worker] Verificando novos jogos gratuitos na GamerPower API...');
+  console.log('[Worker] Verificando novas oportunidades na GamerPower API...');
 
   try {
     const response = await axios.get(GAMERPOWER_API_URL, {
       timeout: 10000,
-      headers: { 'User-Agent': 'Loot0800-Bot/2.0' }
+      headers: { 'User-Agent': 'Loot0800-Bot/2.5' }
     });
 
     const games = response.data;
     if (!Array.isArray(games) || games.length === 0) {
-      console.log('[Worker] Nenhum jogo retornado pela API no momento.');
+      console.log('[Worker] Nenhuma oportunidade retornada pela API no momento.');
       return;
     }
 
-    // 1. Filtrar jogos que ainda não foram notificados
+    // 1. Filtrar itens que ainda não foram notificados
     const unnotifiedGames = [];
     for (const game of games) {
       const alreadyNotified = await isGameNotified(game.id);
@@ -127,29 +190,28 @@ async function checkAndNotifyGames(bot) {
     }
 
     if (unnotifiedGames.length === 0) {
-      console.log('[Worker] Nenhum novo jogo gratuito para notificar.');
+      console.log('[Worker] Nenhuma nova oportunidade para notificar.');
       return;
     }
 
-    // 2. Aplicar a Regra Anti-Spam (limita aos 3 primeiros)
+    // 2. Aplicar a Regra Anti-Spam (limita aos 3 primeiros por ciclo)
     const gamesToNotify = unnotifiedGames.slice(0, MAX_GAMES_PER_RUN);
-    console.log(`[Worker] ${unnotifiedGames.length} novos jogos encontrados. Notificando os ${gamesToNotify.length} primeiros (Anti-Spam)...`);
+    console.log(`[Worker] ${unnotifiedGames.length} novos itens encontrados. Notificando os ${gamesToNotify.length} primeiros (Anti-Spam)...`);
 
     // 3. Buscar todos os usuários cadastrados
     const users = await getAllUsers();
     if (!users || users.length === 0) {
-      console.log('[Worker] Novos jogos detectados, mas não há usuários cadastrados ainda no banco.');
+      console.log('[Worker] Novos drops detectados, mas não há usuários cadastrados ainda no banco.');
       return;
     }
 
     console.log(`[Worker] Avaliando preferências de ${users.length} usuário(s)...`);
 
-    // 4. Enviar mensagem para cada usuário respeitando suas preferências
+    // 4. Enviar mensagem para cada usuário respeitando suas preferências de tipo e lojas
     for (const game of gamesToNotify) {
       const caption = formatGameCaption(game);
 
       for (const user of users) {
-        // Parse das preferências do usuário (salvas como string JSON no SQLite)
         let userPreferences = DEFAULT_PREFERENCES;
         try {
           if (user.preferences) {
@@ -161,9 +223,7 @@ async function checkAndNotifyGames(bot) {
           console.warn(`[Worker] Erro ao parsear preferências do chat_id ${user.chat_id}:`, parseErr.message);
         }
 
-        // Verifica se o jogo atende às preferências do usuário
         if (!isGameMatchingPreferences(game, userPreferences)) {
-          console.log(`[Worker] Jogo "${game.title}" ignorado para ${user.chat_id} (lojas do usuário: ${JSON.stringify(userPreferences)})`);
           continue;
         }
 
@@ -180,23 +240,23 @@ async function checkAndNotifyGames(bot) {
           }
           console.log(`[Worker] Drop enviado com sucesso para chat_id ${user.chat_id}: "${game.title}"`);
         } catch (sendErr) {
-          console.error(`[Worker] Erro ao enviar jogo "${game.title}" para chat_id ${user.chat_id}:`, sendErr.message);
+          console.error(`[Worker] Erro ao enviar drop "${game.title}" para chat_id ${user.chat_id}:`, sendErr.message);
         }
       }
 
-      // 5. Salva o ID do jogo no banco para não repetir
+      // 5. Salva o ID do item no banco para não repetir
       await markGameNotified(game.id);
-      console.log(`[Worker] ✅ Jogo "${game.title}" (ID: ${game.id}) registrado no banco de dados.`);
+      console.log(`[Worker] ✅ Drop "${game.title}" (ID: ${game.id}) registrado no banco de dados.`);
     }
 
     console.log('[Worker] Ciclo de verificação finalizado com sucesso.');
   } catch (error) {
-    console.error('[Worker] Erro ao buscar ou processar jogos na API:', error.message);
+    console.error('[Worker] Erro ao buscar ou processar oportunidades na API:', error.message);
   }
 }
 
 /**
- * Constrói e envia o catálogo completo de todos os jogos ativos agrupados por loja/plataforma em mensagem única.
+ * Constrói e envia o catálogo completo de todos os drops ativos agrupados por categoria e loja em mensagem única.
  * @param {object} bot - Instância do bot do Telegram
  * @param {string|number} chatId - ID do chat do Telegram
  */
@@ -206,7 +266,7 @@ async function sendActiveGamesCatalog(bot, chatId) {
   try {
     const response = await axios.get(GAMERPOWER_API_URL, {
       timeout: 10000,
-      headers: { 'User-Agent': 'Loot0800-Bot/2.0' }
+      headers: { 'User-Agent': 'Loot0800-Bot/2.5' }
     });
 
     const games = response.data;
@@ -227,73 +287,130 @@ async function sendActiveGamesCatalog(bot, chatId) {
         : user.preferences;
     }
 
-    // Filtra jogos pelas preferências do usuário
+    // Filtra oportunidades pelas preferências do usuário
     const matchingGames = games.filter((game) => isGameMatchingPreferences(game, userPreferences));
 
     if (matchingGames.length === 0) {
       await bot.sendMessage(
         chatId,
-        '🎮 Não encontramos jogos ativos para as suas plataformas selecionadas no momento.\n\n💡 Use /config para adicionar mais plataformas ao seu radar!'
+        '🎮 Não encontramos drops ativos para as suas configurações atuais no momento.\n\n💡 Use /config para ativar mais plataformas ou tipos de conteúdo (Loots/Betas) no seu radar!'
       );
       return;
     }
 
-    // Agrupamento estruturado por plataformas
-    const categories = {
-      '🟣 Epic Games Store': [],
-      '🔵 Steam': [],
-      '👾 GOG.com': [],
-      '📦 Prime Gaming': [],
-      '🎮 PlayStation': [],
-      '🟢 Xbox': [],
-      '🔴 Nintendo Switch': [],
-      '📱 Mobile (Android / iOS)': [],
-      '🕹️ Itch.io': [],
-      '💻 Outras Lojas / DRM-Free': []
-    };
+    // Separação em Seções Principais (Jogos Completos, Loots & DLCs, Betas)
+    const fullGames = [];
+    const lootItems = [];
+    const betaItems = [];
 
     matchingGames.forEach((g) => {
-      const text = `${g.platforms || ''} ${g.title || ''} ${g.open_giveaway_url || ''}`.toLowerCase();
-      if (text.includes('epic')) {
-        categories['🟣 Epic Games Store'].push(g);
-      } else if (text.includes('steam')) {
-        categories['🔵 Steam'].push(g);
-      } else if (text.includes('gog')) {
-        categories['👾 GOG.com'].push(g);
-      } else if (text.includes('amazon') || text.includes('prime')) {
-        categories['📦 Prime Gaming'].push(g);
-      } else if (text.includes('playstation') || text.includes('ps4') || text.includes('ps5') || text.includes('psn')) {
-        categories['🎮 PlayStation'].push(g);
-      } else if (text.includes('xbox')) {
-        categories['🟢 Xbox'].push(g);
-      } else if (text.includes('switch') || text.includes('nintendo')) {
-        categories['🔴 Nintendo Switch'].push(g);
-      } else if (text.includes('android') || text.includes('ios') || text.includes('apple') || text.includes('mobile')) {
-        categories['📱 Mobile (Android / iOS)'].push(g);
-      } else if (text.includes('itch')) {
-        categories['🕹️ Itch.io'].push(g);
+      const itemType = (g.type || 'Game').toLowerCase();
+      if (itemType.includes('early access') || itemType.includes('beta')) {
+        betaItems.push(g);
+      } else if (itemType.includes('dlc') || itemType.includes('loot') || itemType.includes('other')) {
+        lootItems.push(g);
       } else {
-        categories['💻 Outras Lojas / DRM-Free'].push(g);
+        fullGames.push(g);
       }
     });
 
-    let message = `🎮 <b>CATÁLOGO DE JOGOS GRÁTIS ATIVOS</b> 🎮\n`;
-    message += `<i>Encontramos <b>${matchingGames.length}</b> jogo(s) 100% gratuito(s) para resgatar agora:</i>\n\n`;
+    // Função auxiliar para agrupar por loja
+    const groupByStore = (items) => {
+      const categories = {
+        '🟣 Epic Games Store': [],
+        '🔵 Steam': [],
+        '👾 GOG.com': [],
+        '📦 Prime Gaming': [],
+        '🎮 PlayStation': [],
+        '🟢 Xbox': [],
+        '🔴 Nintendo Switch': [],
+        '📱 Mobile (Android / iOS)': [],
+        '🕹️ Itch.io': [],
+        '💻 Outras Lojas / DRM-Free': []
+      };
 
-    for (const [catName, list] of Object.entries(categories)) {
-      if (list.length > 0) {
-        message += `<b>${catName} (${list.length})</b>\n`;
-        list.forEach((game) => {
-          const cleanTitle = game.title.replace(/\s*Giveaway\s*/gi, '').trim();
-          const originalPrice = game.worth && game.worth !== 'N/A' ? `<s>${game.worth}</s> ➔ <b>GRÁTIS</b>` : '<b>GRÁTIS</b>';
-          message += `• <a href="${game.open_giveaway_url}">${cleanTitle}</a> — ${originalPrice}\n`;
-        });
-        message += '\n';
+      items.forEach((g) => {
+        const text = `${g.platforms || ''} ${g.title || ''} ${g.open_giveaway_url || ''}`.toLowerCase();
+        if (text.includes('epic')) {
+          categories['🟣 Epic Games Store'].push(g);
+        } else if (text.includes('steam')) {
+          categories['🔵 Steam'].push(g);
+        } else if (text.includes('gog')) {
+          categories['👾 GOG.com'].push(g);
+        } else if (text.includes('amazon') || text.includes('prime')) {
+          categories['📦 Prime Gaming'].push(g);
+        } else if (text.includes('playstation') || text.includes('ps4') || text.includes('ps5') || text.includes('psn')) {
+          categories['🎮 PlayStation'].push(g);
+        } else if (text.includes('xbox')) {
+          categories['🟢 Xbox'].push(g);
+        } else if (text.includes('switch') || text.includes('nintendo')) {
+          categories['🔴 Nintendo Switch'].push(g);
+        } else if (text.includes('android') || text.includes('ios') || text.includes('apple') || text.includes('mobile')) {
+          categories['📱 Mobile (Android / iOS)'].push(g);
+        } else if (text.includes('itch')) {
+          categories['🕹️ Itch.io'].push(g);
+        } else {
+          categories['💻 Outras Lojas / DRM-Free'].push(g);
+        }
+      });
+
+      return categories;
+    };
+
+    let message = `🎮 <b>CATÁLOGO DE DROPS 0800 ATIVOS</b> 🎮\n`;
+    message += `<i>Encontramos <b>${matchingGames.length}</b> oportunidade(s) disponível(is) para você agora:</i>\n\n`;
+
+    // 1. Seção de Jogos Completos
+    if (fullGames.length > 0) {
+      message += `━━━━━━━━━━━━━━━━━━━━\n`;
+      message += `🕹️ <b>JOGOS COMPLETOS (${fullGames.length})</b>\n`;
+      message += `━━━━━━━━━━━━━━━━━━━━\n`;
+      const groupedGames = groupByStore(fullGames);
+      for (const [catName, list] of Object.entries(groupedGames)) {
+        if (list.length > 0) {
+          message += `<b>${catName} (${list.length})</b>\n`;
+          list.forEach((game) => {
+            const cleanTitle = game.title.replace(/\s*Giveaway\s*/gi, '').trim();
+            const originalPrice = game.worth && game.worth !== 'N/A' ? `<s>${game.worth}</s> ➔ <b>GRÁTIS</b>` : '<b>GRÁTIS</b>';
+            const tempTag = isTemporaryOrFreeWeekend(game) ? ' <i>[Teste Temporário]</i>' : '';
+            message += `• <a href="${game.open_giveaway_url}">${cleanTitle}</a> — ${originalPrice}${tempTag}\n`;
+          });
+          message += '\n';
+        }
       }
     }
 
-    message += `⚡ <i>Toque no nome do jogo para abrir a página de resgate!</i>\n`;
-    message += `⚙️ <i>Personalize suas lojas com /config</i>\n\n`;
+    // 2. Seção de Loots & DLCs
+    if (lootItems.length > 0) {
+      message += `━━━━━━━━━━━━━━━━━━━━\n`;
+      message += `🎁 <b>DLCS, SKINS & LOOTS (${lootItems.length})</b>\n`;
+      message += `━━━━━━━━━━━━━━━━━━━━\n`;
+      const topLoot = lootItems.slice(0, 10); // Limita aos 10 principais para não estourar mensagem
+      topLoot.forEach((loot) => {
+        const cleanTitle = loot.title.replace(/\s*Giveaway\s*/gi, '').trim();
+        const price = loot.worth && loot.worth !== 'N/A' ? `<s>${loot.worth}</s> ➔ <b>GRÁTIS</b>` : '<b>GRÁTIS</b>';
+        message += `• <a href="${loot.open_giveaway_url}">${cleanTitle}</a> (${loot.platforms}) — ${price}\n`;
+      });
+      if (lootItems.length > 10) {
+        message += `<i>... e mais ${lootItems.length - 10} DLCs disponíveis!</i>\n`;
+      }
+      message += '\n';
+    }
+
+    // 3. Seção de Betas & Playtests
+    if (betaItems.length > 0) {
+      message += `━━━━━━━━━━━━━━━━━━━━\n`;
+      message += `🔑 <b>BETAS & ACESSO ANTECIPADO (${betaItems.length})</b>\n`;
+      message += `━━━━━━━━━━━━━━━━━━━━\n`;
+      betaItems.forEach((beta) => {
+        const cleanTitle = beta.title.replace(/\s*Giveaway\s*/gi, '').trim();
+        message += `• <a href="${beta.open_giveaway_url}">${cleanTitle}</a> (${beta.platforms}) — <b>ACESSO GRÁTIS</b>\n`;
+      });
+      message += '\n';
+    }
+
+    message += `⚡ <i>Toque no nome do item para abrir o resgate!</i>\n`;
+    message += `⚙️ <i>Personalize lojas e categorias com /config</i>\n\n`;
     message += `💖 <i>Gostou do Loot 0800? <a href="${DONATION_URL}">Apoie o projeto com um café via Pix!</a></i>`;
 
     await bot.sendMessage(chatId, message, {
@@ -306,7 +423,7 @@ async function sendActiveGamesCatalog(bot, chatId) {
       }
     });
   } catch (error) {
-    console.error(`[Worker] Erro ao gerar catálogo de jogos ativos para ${chatId}:`, error.message);
+    console.error(`[Worker] Erro ao gerar catálogo de drops para ${chatId}:`, error.message);
     await bot.sendMessage(
       chatId,
       '❌ Ocorreu uma instabilidade ao consultar os drops. Tente novamente em alguns instantes!'
@@ -317,7 +434,8 @@ async function sendActiveGamesCatalog(bot, chatId) {
 module.exports = {
   checkAndNotifyGames,
   sendActiveGamesCatalog,
-  sendRecentGamesToUser: sendActiveGamesCatalog, // Alias para compatibilidade
+  sendRecentGamesToUser: sendActiveGamesCatalog,
   formatGameCaption,
-  isGameMatchingPreferences
+  isGameMatchingPreferences,
+  isTemporaryOrFreeWeekend
 };

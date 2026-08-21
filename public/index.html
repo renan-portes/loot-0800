@@ -455,6 +455,54 @@
 
       <form id="preferencesForm">
         
+        <!-- Tipos de Conteúdo -->
+        <span class="category-label">🎯 Tipos de Alerta</span>
+        <div class="stores-list">
+          
+          <label class="store-item" for="chk-type-game">
+            <div class="store-info">
+              <div class="store-icon">🎮</div>
+              <div class="store-details">
+                <h4>Jogos Completos</h4>
+                <p>Jogos 100% gratuitos e permanentes na biblioteca</p>
+              </div>
+            </div>
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="chk-type-game" value="type:game" />
+              <div class="custom-check"></div>
+            </div>
+          </label>
+
+          <label class="store-item" for="chk-type-loot">
+            <div class="store-info">
+              <div class="store-icon">🎁</div>
+              <div class="store-details">
+                <h4>DLCs, Skins & Loots</h4>
+                <p>Itens cosméticos, pacotes in-game e expansões</p>
+              </div>
+            </div>
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="chk-type-loot" value="type:loot" />
+              <div class="custom-check"></div>
+            </div>
+          </label>
+
+          <label class="store-item" for="chk-type-beta">
+            <div class="store-info">
+              <div class="store-icon">🔑</div>
+              <div class="store-details">
+                <h4>Betas & Playtests</h4>
+                <p>Acessos antecipados e testes fechados de jogos</p>
+              </div>
+            </div>
+            <div class="checkbox-wrapper">
+              <input type="checkbox" id="chk-type-beta" value="type:beta" />
+              <div class="custom-check"></div>
+            </div>
+          </label>
+
+        </div>
+
         <!-- PC Stores -->
         <span class="category-label">💻 PC & Lojas Digitais</span>
         <div class="stores-list">
@@ -668,10 +716,11 @@
     checkboxes.forEach(chk => chk.addEventListener('change', syncItemStyles));
 
     toggleAllBtn.addEventListener('click', () => {
-      const allChecked = Array.from(checkboxes).every(c => c.checked);
-      checkboxes.forEach(c => c.checked = !allChecked);
+      const storeCheckboxes = Array.from(checkboxes).filter(c => !c.value.startsWith('type:'));
+      const allChecked = storeCheckboxes.every(c => c.checked);
+      storeCheckboxes.forEach(c => c.checked = !allChecked);
       syncItemStyles();
-      toggleAllBtn.textContent = allChecked ? 'Marcar Todas' : 'Desmarcar Todas';
+      toggleAllBtn.textContent = allChecked ? 'Marcar Todas as Lojas' : 'Desmarcar Todas as Lojas';
     });
 
     async function loadPreferences() {
@@ -680,8 +729,10 @@
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data.preferences)) {
+            const hasType = data.preferences.some(p => p.startsWith('type:'));
+            const effectivePrefs = hasType ? data.preferences : [...data.preferences, 'type:game'];
             checkboxes.forEach(chk => {
-              chk.checked = data.preferences.includes(chk.value);
+              chk.checked = effectivePrefs.includes(chk.value);
             });
             syncItemStyles();
             return;
@@ -691,8 +742,14 @@
         console.warn('Erro ao carregar preferências:', err);
       }
 
-      // Default: marcar todas caso novo
-      checkboxes.forEach(chk => chk.checked = true);
+      // Default: Jogos completos + todas as lojas
+      checkboxes.forEach(chk => {
+        if (chk.value === 'type:game' || !chk.value.startsWith('type:')) {
+          chk.checked = true;
+        } else {
+          chk.checked = false;
+        }
+      });
       syncItemStyles();
     }
 

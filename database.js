@@ -2,8 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
-// Lista de lojas padrão suportadas na v2.0
+// Lista de preferências padrão suportadas na v2.5 (Tipos de Conteúdo + Lojas)
 const DEFAULT_PREFERENCES = [
+  'type:game', // Jogos completos ativado por padrão
   'epic',
   'steam',
   'gog',
