@@ -49,7 +49,33 @@ function buildPreferencesKeyboard(userPreferences, configUrl) {
 
   const rows = [];
 
-  // Seção 1: Tipos de Conteúdo (Jogos, Loots, Betas)
+  // Seção 1: Lojas e Plataformas
+  for (let i = 0; i < STORE_OPTIONS.length; i += 2) {
+    const row = [];
+    const s1 = STORE_OPTIONS[i];
+    const isChecked1 = prefs.includes(s1.id);
+    row.push({
+      text: `${isChecked1 ? '✅' : '❌'} ${s1.name}`,
+      callback_data: `toggle:${s1.id}`
+    });
+
+    if (i + 1 < STORE_OPTIONS.length) {
+      const s2 = STORE_OPTIONS[i + 1];
+      const isChecked2 = prefs.includes(s2.id);
+      row.push({
+        text: `${isChecked2 ? '✅' : '❌'} ${s2.name}`,
+        callback_data: `toggle:${s2.id}`
+      });
+    }
+    rows.push(row);
+  }
+
+  // Ação rápida de lojas
+  rows.push([
+    { text: '✨ Alternar Todas as Lojas', callback_data: 'toggle:all_stores' }
+  ]);
+
+  // Seção 2: Tipos de Conteúdo (Jogos, Loots, Betas) abaixo de Android / iOS
   const isGameChecked = prefs.includes('type:game');
   const isLootChecked = prefs.includes('type:loot');
   const isBetaChecked = prefs.includes('type:beta');
@@ -72,32 +98,7 @@ function buildPreferencesKeyboard(userPreferences, configUrl) {
     }
   ]);
 
-  // Seção 2: Lojas e Plataformas
-  for (let i = 0; i < STORE_OPTIONS.length; i += 2) {
-    const row = [];
-    const s1 = STORE_OPTIONS[i];
-    const isChecked1 = prefs.includes(s1.id);
-    row.push({
-      text: `${isChecked1 ? '✅' : '❌'} ${s1.name}`,
-      callback_data: `toggle:${s1.id}`
-    });
-
-    if (i + 1 < STORE_OPTIONS.length) {
-      const s2 = STORE_OPTIONS[i + 1];
-      const isChecked2 = prefs.includes(s2.id);
-      row.push({
-        text: `${isChecked2 ? '✅' : '❌'} ${s2.name}`,
-        callback_data: `toggle:${s2.id}`
-      });
-    }
-    rows.push(row);
-  }
-
-  // Ações Rápidas
-  rows.push([
-    { text: '✨ Alternar Todas as Lojas', callback_data: 'toggle:all_stores' }
-  ]);
-
+  // Seção 3: Navegação e Ações Rápidas
   if (configUrl) {
     rows.push([
       { text: '🌐 Abrir Portal Web no Navegador', url: configUrl }
