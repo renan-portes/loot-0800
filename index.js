@@ -31,11 +31,12 @@ const STORE_OPTIONS = [
 ];
 
 /**
- * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja, atalho de catálogo e botão de apoio.
+ * Constrói o layout do teclado inline com o status (✅ / ❌) de cada loja, portal web, atalho de catálogo e botão de apoio.
  * @param {Array<string>} userPreferences - Lista de preferências do usuário
+ * @param {string} [configUrl] - URL do portal Web com chatId
  * @returns {Array<Array<object>>} - Matriz de botões para o Telegram
  */
-function buildPreferencesKeyboard(userPreferences) {
+function buildPreferencesKeyboard(userPreferences, configUrl) {
   const prefs = Array.isArray(userPreferences) ? userPreferences : DEFAULT_PREFERENCES;
   const rows = [];
 
@@ -59,15 +60,24 @@ function buildPreferencesKeyboard(userPreferences) {
     rows.push(row);
   }
 
-  // Botões de ação rápida
+  // Botão de alternar todas as plataformas
   rows.push([
     { text: '✨ Marcar / Desmarcar Todas', callback_data: 'toggle:all' }
   ]);
 
+  // Botão chamativo para abrir o portal Web (se a URL for fornecida)
+  if (configUrl) {
+    rows.push([
+      { text: '🌐 Abrir Portal Web no Navegador', url: configUrl }
+    ]);
+  }
+
+  // Botão para ver todos os jogos ativos agora
   rows.push([
     { text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }
   ]);
 
+  // Botão de apoio ao projeto
   rows.push([
     { text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }
   ]);
@@ -100,9 +110,11 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     console.log(`[Telegram Bot] Polling error: ${msg}`);
   });
 
-  // Comando /start com botão interativo para ver o catálogo de todos os jogos ativos e apoiar
+  // Comando /start com botões interativos
   bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
+    const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+    const configUrl = `${baseUrl}/?chatId=${chatId}`;
 
     // Registra o usuário no banco de dados (INSERT OR IGNORE)
     addUser(chatId, (err) => {
@@ -114,11 +126,12 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     bot.sendMessage(
       chatId,
       `Bem-vindo ao Loot 0800! 🎮 O seu radar de jogos grátis está online. Seu ID foi registrado com sucesso!\n\n` +
-      `⚡ Clique no botão abaixo para ver **todos os jogos 100% gratuitos ativos agora** ou digite /config para personalizar suas plataformas.`,
+      `⚡ Use os botões abaixo para ver os jogos ativos, configurar suas lojas ou abrir o portal Web.`,
       {
         reply_markup: {
           inline_keyboard: [
             [{ text: '🎁 Ver Todos os Jogos Ativos Agora', callback_data: 'get_recent_games' }],
+            [{ text: '🌐 Abrir Portal Web de Configuração', url: configUrl }],
             [{ text: '☕ Apoiar o Projeto (Pix)', url: DONATION_URL }]
           ]
         }
@@ -126,7 +139,7 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     );
   });
 
-  // Comando /config (Envia link do portal Web E botões Inline Keyboard)
+  // Comando /config (Envia painel com botões inline interativos e botão de Portal Web)
   bot.onText(/\/config/, async (msg) => {
     const chatId = msg.chat.id;
     const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -145,13 +158,12 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
       console.error('[Telegram Bot] Erro ao buscar preferências do usuário para /config:', err.message);
     }
 
-    const keyboard = buildPreferencesKeyboard(userPreferences);
+    const keyboard = buildPreferencesKeyboard(userPreferences, configUrl);
 
     bot.sendMessage(
       chatId,
       `⚙️ <b>Painel de Preferências - Loot 0800</b>\n\n` +
-      `Toque nos botões abaixo para ativar ou desativar plataformas diretamente no Telegram, ou acesse o portal Web:\n` +
-      `🌐 <a href="${configUrl}">Abrir Portal Web</a>`,
+      `Toque nos botões abaixo para ativar/desativar plataformas diretamente no Telegram, ou abra o portal web no navegador:`,
       {
         parse_mode: 'HTML',
         reply_markup: {
@@ -186,6 +198,8 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
     // Ação: Alternar preferências de plataformas
     if (data.startsWith('toggle:')) {
       const storeKey = data.replace('toggle:', '');
+      const baseUrl = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+      const configUrl = `${baseUrl}/?chatId=${chatId}`;
 
       try {
         await addUser(chatId);
@@ -216,8 +230,8 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
         // Salva no banco de dados SQLite
         await updateUserPreferences(chatId, userPreferences);
 
-        // Atualiza o teclado inline com os novos ícones (✅ / ❌)
-        const newKeyboard = buildPreferencesKeyboard(userPreferences);
+        // Atualiza o teclado inline mantendo o botão do Portal Web
+        const newKeyboard = buildPreferencesKeyboard(userPreferences, configUrl);
 
         await bot.answerCallbackQuery(query.id, {
           text: storeKey === 'all'
