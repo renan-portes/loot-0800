@@ -10,7 +10,7 @@ const {
   updateUserPreferences,
   DEFAULT_PREFERENCES
 } = require('./database');
-const { checkAndNotifyGames, sendActiveGamesCatalog } = require('./worker');
+const { checkAndNotifyGames, sendActiveGamesCatalog, sendAllLootsToUser } = require('./worker');
 
 // Configurações de ambiente
 const PORT = process.env.PORT || 3000;
@@ -290,6 +290,20 @@ if (!token || token === 'SEU_TELEGRAM_BOT_TOKEN_AQUI') {
         await sendActiveGamesCatalog(bot, chatId);
       } catch (err) {
         console.error('[Telegram Bot] Erro ao enviar catálogo de jogos:', err.message);
+      }
+      return;
+    }
+
+    // Ação: Buscar lista completa de todas as DLCs & Loots
+    if (data === 'get_all_loots') {
+      try {
+        await bot.answerCallbackQuery(query.id, {
+          text: 'Compilando todas as DLCs disponíveis...'
+        });
+
+        await sendAllLootsToUser(bot, chatId);
+      } catch (err) {
+        console.error('[Telegram Bot] Erro ao enviar lista completa de DLCs:', err.message);
       }
       return;
     }

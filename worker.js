@@ -81,7 +81,7 @@ function isGameMatchingPreferences(game, userPreferences) {
 
   // 1. Filtragem por Tipo de Conteúdo (Jogos, Loots/DLCs, Betas)
   const hasTypeFilter = userPreferences.some((p) => p.startsWith('type:'));
-  const wantsGames = hasTypeFilter ? userPreferences.includes('type:game') : true; // Default true para compatibilidade
+  const wantsGames = hasTypeFilter ? userPreferences.includes('type:game') : true;
   const wantsLoot = userPreferences.includes('type:loot');
   const wantsBeta = userPreferences.includes('type:beta');
 
@@ -93,7 +93,6 @@ function isGameMatchingPreferences(game, userPreferences) {
   } else if (itemType.includes('dlc') || itemType.includes('loot') || itemType.includes('other')) {
     matchesType = wantsLoot;
   } else {
-    // Tipo 'Game' ou padrão
     matchesType = wantsGames;
   }
 
@@ -102,7 +101,6 @@ function isGameMatchingPreferences(game, userPreferences) {
   }
 
   // 2. Filtragem por Plataforma / Loja
-  // Se o usuário selecionou "todas"
   if (userPreferences.some((p) => ['todas', 'all', '*'].includes(p.toLowerCase()))) {
     return true;
   }
@@ -111,7 +109,7 @@ function isGameMatchingPreferences(game, userPreferences) {
 
   const storePreferences = userPreferences.filter((p) => !p.startsWith('type:'));
   if (storePreferences.length === 0) {
-    return true; // Se não escolheu nenhuma loja específica, aceita todas
+    return true;
   }
 
   return storePreferences.some((pref) => {
@@ -385,7 +383,7 @@ async function sendActiveGamesCatalog(bot, chatId) {
       message += `━━━━━━━━━━━━━━━━━━━━\n`;
       message += `🎁 <b>DLCS, SKINS & LOOTS (${lootItems.length})</b>\n`;
       message += `━━━━━━━━━━━━━━━━━━━━\n`;
-      const topLoot = lootItems.slice(0, 10); // Limita aos 10 principais para não estourar mensagem
+      const topLoot = lootItems.slice(0, 10);
       topLoot.forEach((loot) => {
         const cleanTitle = loot.title.replace(/\s*Giveaway\s*/gi, '').trim();
         const price = loot.worth && loot.worth !== 'N/A' ? `<s>${loot.worth}</s> ➔ <b>GRÁTIS</b>` : '<b>GRÁTIS</b>';
@@ -413,13 +411,21 @@ async function sendActiveGamesCatalog(bot, chatId) {
     message += `⚙️ <i>Personalize lojas e categorias com /config</i>\n\n`;
     message += `💖 <i>Gostou do Loot 0800? <a href="${DONATION_URL}">Apoie o projeto com um café via Pix!</a></i>`;
 
+    const inlineKeyboard = [];
+    if (lootItems.length > 10) {
+      inlineKeyboard.push([
+        { text: `🎁 Ver Todas as ${lootItems.length} DLCs & Loots`, callback_data: 'get_all_loots' }
+      ]);
+    }
+    inlineKeyboard.push([
+      { text: '☕ Apoiar o Loot 0800 via Pix', url: DONATION_URL }
+    ]);
+
     await bot.sendMessage(chatId, message, {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
       reply_markup: {
-        inline_keyboard: [
-          [{ text: '☕ Apoiar o Loot 0800 via Pix', url: DONATION_URL }]
-        ]
+        inline_keyboard: inlineKeyboard
       }
     });
   } catch (error) {
@@ -431,9 +437,98 @@ async function sendActiveGamesCatalog(bot, chatId) {
   }
 }
 
+/**
+ * Envia a lista completa de todas as DLCs, Skins e Loots ativos para o usuário.
+ * @param {object} bot - Instância do bot do Telegram
+ * @param {string|number} chatId - ID do chat do Telegram
+ */
+async function sendAllLootsToUser(bot, chatId) {
+  if (!bot || !chatId) return;
+
+  try {
+    const response = await axios.get(GAMERPOWER_API_URL, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Loot0800-Bot/2.5' }
+    });
+
+    const games = response.data;
+    if (!Array.isArray(games) || games.length === 0) {
+      return bot.sendMessage(chatId, '🎁 Nenhuma DLC ou Loot ativo no momento.');
+    }
+
+    const user = await getUser(chatId);
+    let userPreferences = DEFAULT_PREFERENCES;
+    if (user && user.preferences) {
+      userPreferences = typeof user.preferences === 'string'
+        ? JSON.parse(user.preferences)
+        : user.preferences;
+    }
+
+    // Força tipo loot ativo respeitando as lojas do usuário
+    const effectivePreferences = Array.isArray(userPreferences)
+      ? [...userPreferences, 'type:loot']
+      : [...DEFAULT_PREFERENCES, 'type:loot'];
+
+    const lootItems = games.filter((g) => {
+      const itemType = (g.type || '').toLowerCase();
+      const isLoot = itemType.includes('dlc') || itemType.includes('loot') || itemType.includes('other');
+      return isLoot && isGameMatchingPreferences(g, effectivePreferences);
+    });
+
+    if (lootItems.length === 0) {
+      return bot.sendMessage(
+        chatId,
+        '🎁 Nenhuma DLC ativa para as suas lojas selecionadas. Use /config para ativar mais lojas!'
+      );
+    }
+
+    let message = `🎁 <b>LISTA COMPLETA: TODAS AS DLCS & LOOTS ATIVOS (${lootItems.length})</b>\n\n`;
+
+    lootItems.forEach((loot, idx) => {
+      const cleanTitle = loot.title.replace(/\s*Giveaway\s*/gi, '').trim();
+      const price = loot.worth && loot.worth !== 'N/A' ? `<s>${loot.worth}</s> ➔ <b>GRÁTIS</b>` : '<b>GRÁTIS</b>';
+      message += `${idx + 1}. <a href="${loot.open_giveaway_url}">${cleanTitle}</a> (${loot.platforms}) — ${price}\n`;
+    });
+
+    message += `\n⚡ <i>Toque no nome do item para resgatar!</i>`;
+
+    // Divisão segura em partes caso ultrapasse o limite de caracteres
+    if (message.length > 3800) {
+      const lines = message.split('\n');
+      let chunk = '';
+      for (const line of lines) {
+        if ((chunk + '\n' + line).length > 3800) {
+          await bot.sendMessage(chatId, chunk, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true
+          });
+          chunk = line;
+        } else {
+          chunk = chunk ? chunk + '\n' + line : line;
+        }
+      }
+      if (chunk) {
+        await bot.sendMessage(chatId, chunk, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        });
+      }
+    } else {
+      await bot.sendMessage(chatId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+    }
+  } catch (error) {
+    console.error(`[Worker] Erro ao enviar todas as DLCs para ${chatId}:`, error.message);
+    bot.sendMessage(chatId, '❌ Erro ao consultar todas as DLCs. Tente novamente em instantes.');
+  }
+}
+
 module.exports = {
   checkAndNotifyGames,
   sendActiveGamesCatalog,
+  sendAllLootsToUser,
   sendRecentGamesToUser: sendActiveGamesCatalog,
   formatGameCaption,
   isGameMatchingPreferences,
